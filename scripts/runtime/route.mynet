@@ -1,0 +1,468 @@
+#!/bin/sh
+# route.mynet - OpenWrt 路由管理脚本
+# 用于根据配置文件应用 VPN 路由规则
+#
+# 使用方式:
+#   route.mynet start --config /path/to/route.conf --interface gnb_tun --mynet-home /path/to/mynet
+#   route.mynet stop --interface gnb_tun --mynet-home /path/to/mynet
+#   route.mynet status --interface gnb_tun --mynet-home /path/to/mynet
+#
+# 路由配置文件格式 (标准 ip route 命令格式):
+#   # Node 7175750762685433 network via 10.244.123.193
+#   192.168.6.0/24 via 10.244.123.193 dev tun0
+#   # Gateway route to Node 1436307089532408 VPN IP
+#   10.244.123.192/32 via 10.244.124.194 dev tun0
+#
+# 说明:
+#   - 必须通过 --mynet-home 参数或 MYNET_HOME 环境变量指定安装目录
+
+# ============================================
+# 核心检查: MYNET_HOME 必须存在
+# ============================================
+if [ -z "${MYNET_HOME:-}" ]; then
+    echo "[route.mynet] FATAL: MYNET_HOME not set" >&2
+    echo "[route.mynet] MYNET_HOME must be provided via:" >&2
+    echo "[route.mynet]   1. Environment variable: export MYNET_HOME=/path/to/mynet" >&2
+    echo "[route.mynet]   2. Command parameter: --mynet-home /path/to/mynet" >&2
+    exit 1
+fi
+
+if [ ! -d "$MYNET_HOME" ]; then
+    echo "[route.mynet] FATAL: MYNET_HOME directory does not exist: $MYNET_HOME" >&2
+    exit 1
+fi
+
+if [ ! -f "$MYNET_HOME/conf/mynet.conf" ]; then
+    echo "[route.mynet] FATAL: mynet.conf not found: $MYNET_HOME/conf/mynet.conf" >&2
+    exit 1
+fi
+
+# 从 mynet.conf 读取变量
+get_config_var() {
+    config_file="$1"
+    key="$2"
+    [ -f "$config_file" ] && grep "^${key}=" "$config_file" 2>/dev/null | head -1 | cut -d'=' -f2-
+}
+
+# 日志函数
+log() {
+    echo "[route.mynet] $*"
+    logger -t "route.mynet" "$*"
+}
+
+log_error() {
+    echo "[route.mynet] ERROR: $*" >&2
+    logger -t "route.mynet" -p err "$*"
+}
+
+log_warn() {
+    echo "[route.mynet] WARN: $*" >&2
+    logger -t "route.mynet" -p warn "$*"
+}
+
+# 应用路由配置
+apply_routes() {
+    config_file="$1"
+    interface="$2"
+
+    log "Applying routes from: $config_file"
+    log "VPN interface: $interface"
+
+    # 检查路由配置是否需要更新
+    mynet_home="${config_file%/conf/route.conf}"
+    mynet_conf="$mynet_home/conf/mynet.conf"
+
+    # 如果 route.conf 不存在，尝试自动生成
+    if [ ! -f "$config_file" ]; then
+        log_warn "Route config file not found: $config_file"
+
+        # 检查是否为标准路径 conf/route.conf (POSIX sh 使用 case)
+        case "$config_file" in
+            */conf/route.conf)
+                log "Attempting to auto-generate route config..."
+
+                # 从 mynet.conf 提取节点 ID
+                if [ -f "$mynet_conf" ]; then
+                    node_id=$(get_config_var "$mynet_conf" "NODE_ID")
+                    vpn_config=$(get_config_var "$mynet_conf" "VPN_CONFIG")
+
+                    if [ -n "$node_id" ]; then
+                        log "Detected node ID: $node_id"
+
+                        # 调用 mynet refresh-routes 生成配置
+                        mynet_bin="$mynet_home/bin/mynet"
+                        if [ -f "$mynet_bin" ]; then
+                            log "Executing: $mynet_bin refresh-routes --node-id $node_id --auto"
+                            if MYNET_HOME="$mynet_home" "$mynet_bin" refresh-routes --node-id "$node_id" --auto 2>&1 | while read line; do log "  $line"; done; then
+                                log "Route config auto-generated successfully"
+                            else
+                                log_error "Failed to generate route config"
+                                return 1
+                            fi
+                        else
+                            log_error "mynet command not found: $mynet_bin"
+                            return 1
+                        fi
+                    else
+                        log_error "Cannot extract node ID from mynet.conf"
+                        return 1
+                    fi
+                else
+                    log_error "mynet.conf not found: $mynet_conf"
+                    return 1
+                fi
+                ;;
+            *)
+                log_error "Non-standard config path, cannot auto-generate"
+                return 1
+                ;;
+        esac
+    else
+        # 配置存在，检查是否需要更新（源文件更新）
+        node_id=$(get_config_var "$mynet_conf" "NODE_ID")
+        vpn_config=$(get_config_var "$mynet_conf" "VPN_CONFIG")
+        source_conf="${vpn_config:-$mynet_home/driver/gnb/conf/$node_id}/route.conf"
+
+        if [ -f "$source_conf" ]; then
+            # OpenWrt stat 命令格式
+            source_mtime=$(stat -c %Y "$source_conf" 2>/dev/null || echo "0")
+            target_mtime=$(stat -c %Y "$config_file" 2>/dev/null || echo "0")
+
+            if [ "$source_mtime" -gt "$target_mtime" ]; then
+                log "Source config updated, regenerating route config..."
+
+                # 调用 mynet refresh-routes 重新生成配置（不要直接复制 GNB 格式）
+                mynet_bin="$mynet_home/bin/mynet"
+                if [ -f "$mynet_bin" ]; then
+                    log "Executing: $mynet_bin refresh-routes --node-id $node_id --auto"
+                    if MYNET_HOME="$mynet_home" "$mynet_bin" refresh-routes --node-id "$node_id" --auto 2>&1 | while read line; do log "  $line"; done; then
+                        log "Route config regenerated successfully"
+                    else
+                        log_error "Failed to regenerate route config"
+                        return 1
+                    fi
+                else
+                    log_error "mynet command not found: $mynet_bin"
+                    return 1
+                fi
+            fi
+        fi
+    fi
+
+    if [ -z "$interface" ]; then
+        log_error "VPN interface not specified"
+        return 1
+    fi
+
+    # 检查接口是否存在
+    if ! ip link show "$interface" >/dev/null 2>&1; then
+        log_warn "VPN interface does not exist yet: $interface"
+        log_warn "Routes will be applied when interface comes up"
+    fi
+
+    local route_count=0
+    local error_count=0
+
+    # 读取配置文件并应用路由
+    # 新格式支持三种形式：
+    #   1. network dev interface           (对端网关IP，直连)
+    #   2. network via gateway             (网段路由，系统自动选择接口)
+    #   3. network via gateway dev interface (兼容旧格式)
+    while read -r line; do
+        # 跳过空行和注释
+        [ -z "$line" ] && continue
+        echo "$line" | grep -q '^[[:space:]]*#' && continue
+
+        # 解析路由条目
+        local network=$(echo "$line" | awk '{print $1}')
+
+        # 检查是否包含 "via" 关键字
+        if echo "$line" | grep -q " via "; then
+            # 格式: network via gateway [dev interface]
+            local gateway=$(echo "$line" | awk '{print $3}')
+            local has_dev=$(echo "$line" | grep -q " dev " && echo "yes" || echo "no")
+
+            if [ -z "$gateway" ]; then
+                log_warn "Invalid route entry (missing gateway): $line"
+                error_count=$((error_count + 1))
+                continue
+            fi
+
+            # 【关键】检查本地网络冲突（精确匹配）
+            local conflict_check=$(ip route show exact "$network" 2>/dev/null | grep -v "$interface" | head -n 1)
+            if [ -n "$conflict_check" ]; then
+                log_warn "⚠️ 路由冲突: $network 与本地网络冲突 - 已跳过"
+                log_warn "   现有路由: $conflict_check"
+                error_count=$((error_count + 1))
+                continue
+            fi
+
+            # 检查路由是否已存在（精确匹配）
+            local existing_route=$(ip route show exact "$network" 2>/dev/null)
+            if [ -n "$existing_route" ]; then
+                log "Route already exists, skipping: $network"
+                route_count=$((route_count + 1))
+                continue
+            fi
+
+            # 添加路由
+            if [ "$has_dev" = "yes" ]; then
+                # 格式: network via gateway dev interface (兼容旧格式)
+                if ip route add "$network" via "$gateway" dev "$interface" 2>/dev/null; then
+                    log "Added route: $network via $gateway dev $interface"
+                    route_count=$((route_count + 1))
+                else
+                    log_error "Failed to add route: $network via $gateway dev $interface"
+                    error_count=$((error_count + 1))
+                fi
+            else
+                # 格式: network via gateway (新格式 - 系统自动选择接口)
+                if ip route add "$network" via "$gateway" 2>/dev/null; then
+                    log "Added route: $network via $gateway (auto-dev)"
+                    route_count=$((route_count + 1))
+                else
+                    log_error "Failed to add route: $network via $gateway"
+                    error_count=$((error_count + 1))
+                fi
+            fi
+        elif echo "$line" | grep -q " dev "; then
+            # 格式: network dev interface (对端网关IP直连)
+            local route_iface=$(echo "$line" | awk '{print $3}')
+
+            if [ -z "$network" ]; then
+                log_warn "Invalid route entry (missing network): $line"
+                error_count=$((error_count + 1))
+                continue
+            fi
+
+            # 检查路由是否已存在
+            local existing_route=$(ip route show exact "$network" 2>/dev/null)
+            if [ -n "$existing_route" ]; then
+                log "Route already exists, skipping: $network"
+                route_count=$((route_count + 1))
+                continue
+            fi
+
+            # 添加直连路由（对端网关IP）
+            if ip route add "$network" dev "$interface" 2>/dev/null; then
+                log "Added peer route: $network dev $interface"
+                route_count=$((route_count + 1))
+            else
+                log_error "Failed to add peer route: $network dev $interface"
+                error_count=$((error_count + 1))
+            fi
+        else
+            log_warn "Invalid route format: $line"
+            error_count=$((error_count + 1))
+        fi
+    done < "$config_file"
+
+    log "Routes applied: $route_count, Errors: $error_count"
+
+    if [ $route_count -eq 0 ]; then
+        log_warn "No routes were applied"
+        return 1
+    fi
+
+    return 0
+}
+
+# 清除路由规则
+# 注意：只删除配置文件中定义的路由，不干涉系统其他路由
+clear_routes() {
+    local config_file="$1"
+    local interface="$2"
+
+    log "Clearing routes from config: $config_file"
+    log "VPN interface: $interface"
+
+    if [ -z "$interface" ]; then
+        log_error "VPN interface not specified"
+        return 1
+    fi
+
+    # 如果没有配置文件，无法清除（我们只处理配置文件中的路由）
+    if [ -z "$config_file" ] || [ ! -f "$config_file" ]; then
+        log_error "Config file not found or not specified: $config_file"
+        log_error "Cannot clear routes without config file (we only manage routes from config)"
+        return 1
+    fi
+
+    local count=0
+    local not_found=0
+
+    # 只删除配置文件中定义的路由
+    while read -r line; do
+        # 跳过空行和注释
+        [ -z "$line" ] && continue
+        echo "$line" | grep -q '^[[:space:]]*#' && continue
+
+        # 解析网络地址
+        local network=$(echo "$line" | awk '{print $1}')
+
+        # 验证字段
+        if [ -z "$network" ]; then
+            continue
+        fi
+
+        # 检查路由是否存在（精确匹配）
+        # 注意：删除时不需要区分格式，只要网络地址匹配即可
+        if ip route show exact "$network" >/dev/null 2>&1; then
+            # 删除路由（让系统自动判断如何删除）
+            if ip route del "$network" 2>/dev/null; then
+                log "Removed route: $network"
+                count=$((count + 1))
+            else
+                log_warn "Failed to remove route: $network"
+            fi
+        else
+            # 路由不存在（可能已被其他程序删除，或从未添加成功）
+            not_found=$((not_found + 1))
+        fi
+    done < "$config_file"
+
+    log "Routes removed: $count, Not found: $not_found"
+    return 0
+}
+
+# 使用说明
+show_usage() {
+    cat <<EOF
+Usage: route.mynet <command> [options]
+
+Commands:
+    start       应用路由配置
+    stop        清除路由规则（只删除配置文件中的路由）
+    status      查看路由状态
+
+Options:
+    --config <path>         路由配置文件路径 (start和stop命令必需)
+    --interface <name>      VPN接口名称 (必需)
+    --mynet-home <path>     MyNet主目录 (可选，用于自动查找配置)
+
+Examples:
+    route.mynet start --config /etc/mynet/conf/route.conf --interface gnb_tun
+    route.mynet stop --config /etc/mynet/conf/route.conf --interface gnb_tun
+    route.mynet status --interface gnb_tun
+
+Route Config Format:
+    # 标准 ip route 命令格式
+    # Node 7175750762685433 network via 10.244.123.193
+    192.168.6.0/24 via 10.244.123.193 dev tun0
+    # Gateway route to Node 1436307089532408 VPN IP
+    10.244.123.192/32 via 10.244.124.194 dev tun0
+
+EOF
+}
+
+# 主函数
+main() {
+    local command=""
+    local config_file=""
+    local interface=""
+
+    # 解析参数
+    if [ $# -lt 1 ]; then
+        show_usage
+        exit 1
+    fi
+
+    command="$1"
+    shift
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --config)
+                config_file="$2"
+                shift 2
+                ;;
+            --interface)
+                interface="$2"
+                shift 2
+                ;;
+            --mynet-home)
+                MYNET_HOME="$2"
+                shift 2
+                ;;
+            -h|--help)
+                show_usage
+                exit 0
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                show_usage
+                exit 1
+                ;;
+        esac
+    done
+
+    # 如果没有指定 config，使用 MYNET_HOME 构建默认路径
+    if [ -z "$config_file" ]; then
+        config_file="$MYNET_HOME/conf/route.conf"
+        log "Auto-detected config: $config_file"
+    fi
+
+    # 执行命令
+    case "$command" in
+        start)
+            # 验证必需参数
+            if [ -z "$config_file" ]; then
+                log_error "Missing required option: --config"
+                show_usage
+                exit 1
+            fi
+
+            if [ -z "$interface" ]; then
+                log_error "Missing required option: --interface"
+                show_usage
+                exit 1
+            fi
+
+            log "Starting route configuration..."
+            apply_routes "$config_file" "$interface"
+            exit $?
+            ;;
+
+        stop)
+            # 验证必需参数
+            if [ -z "$config_file" ]; then
+                log_error "Missing required option: --config"
+                log_error "Config file is required to know which routes to remove"
+                show_usage
+                exit 1
+            fi
+
+            if [ -z "$interface" ]; then
+                log_error "Missing required option: --interface"
+                show_usage
+                exit 1
+            fi
+
+            log "Stopping route configuration..."
+            clear_routes "$config_file" "$interface"
+            exit $?
+            ;;
+
+        status)
+            # 验证必需参数
+            if [ -z "$interface" ]; then
+                log_error "Missing required option: --interface"
+                show_usage
+                exit 1
+            fi
+
+            log "Route status for interface: $interface"
+            ip route show dev "$interface" 2>/dev/null || log "No routes found"
+            exit 0
+            ;;
+
+        *)
+            log_error "Unknown command: $command"
+            show_usage
+            exit 1
+            ;;
+    esac
+}
+
+# 直接执行 main 函数
+main "$@"
