@@ -82,6 +82,7 @@ define Package/luci-app-mynet/install
 	# --- Runtime scripts: tools (optional diagnostics) ---
 	$(INSTALL_DIR) $(1)/etc/mynet/scripts/tools
 	$(INSTALL_BIN) ./scripts/tools/check_openwrt_masq.sh $(1)/etc/mynet/scripts/tools/
+	$(INSTALL_BIN) ./scripts/tools/verify_gnb_es_orphan.sh $(1)/etc/mynet/scripts/tools/
 	$(INSTALL_BIN) ./scripts/tools/diagnose_network.sh $(1)/etc/mynet/scripts/tools/
 	$(INSTALL_BIN) ./scripts/tools/optimize_gnb_conntrack.sh $(1)/etc/mynet/scripts/tools/
 

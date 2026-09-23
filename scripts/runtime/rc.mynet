@@ -3,6 +3,7 @@
 #
 # E-1（进行中）：目标态 procd 接管 mynetd（respawn / SIGHUP reload）。
 # 完整 procd 样例见 rc.mynet.procd.snippet。
+# 切换前请在实机跑 /etc/mynet/scripts/tools/verify_gnb_es_orphan.sh --crash
 # 当前仍用 rc.common start/stop + Lua 委托——待 gnb_es 孤儿验证后切换。
 #
 # 架构:
