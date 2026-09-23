@@ -128,8 +128,10 @@ define Package/luci-app-mynet/postinst
 [ -n "$${IPKG_INSTROOT}" ] && exit 0
 # Clean up legacy _src directory from older versions
 rm -rf /etc/mynet/scripts/_src
-# Stop and disable Go mynetd (replaced by cron heartbeat)
-pkill -x mynetd 2>/dev/null || true
+# E-1/E-5：mynetd 由 procd 托管（不再 pkill）
+# 旧「pkill mynetd + cron heartbeat」路径保留为可选（mynet-heartbeat）
+[ -x /etc/init.d/mynetd ] && /etc/init.d/mynetd enable 2>/dev/null || true
+[ -x /etc/init.d/mynetd ] && /etc/init.d/mynetd start 2>/dev/null || true
 # Enable and load tun module
 modprobe tun 2>/dev/null
 # Sync proxy hooks -> plugin/proxy/ (rc.mynet calls scripts/plugin/<plugin>/<hook>.sh)
@@ -169,3 +171,43 @@ exit 0
 endef
 
 $(eval $(call BuildPackage,luci-app-mynet))
+
+# ── E-5：mynet_agent OpenWrt 产物（瘦构建 mynetd，无 embed WebUI）──
+define Package/mynet-agent
+  SECTION:=net
+  CATEGORY:=Network
+  TITLE:=MyNet agent (mynetd transport-only)
+  DEPENDS:=+libc
+  PKGARCH:=all
+endef
+
+define Package/mynet-agent/description
+  mynetd 纯通信层（心跳/WS/命令分派）。系统能力在 mynet 执行器。
+  产物名 mynet_agent_openwrt_*（E-8）。
+endef
+
+define Package/mynet-agent/install
+	$(INSTALL_DIR) $(1)/usr/sbin
+	# 构建时放入 files/mynetd（GOOS=linux GOARCH 对应 mips/mipsle）
+	[ -f ./files/mynetd ] && $(INSTALL_BIN) ./files/mynetd $(1)/usr/sbin/mynetd || true
+	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) ./scripts/runtime/mynetd.init $(1)/etc/init.d/mynetd
+endef
+
+define Package/mynet-agent/postinst
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] && exit 0
+/etc/init.d/mynetd enable 2>/dev/null || true
+/etc/init.d/mynetd start 2>/dev/null || true
+exit 0
+endef
+
+define Package/mynet-agent/prerm
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] && exit 0
+/etc/init.d/mynetd stop 2>/dev/null || true
+/etc/init.d/mynetd disable 2>/dev/null || true
+exit 0
+endef
+
+$(eval $(call BuildPackage,mynet-agent))
