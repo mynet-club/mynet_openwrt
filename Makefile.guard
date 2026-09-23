@@ -1,0 +1,23 @@
+# MyNet 门禁（独立于本仓构建 Makefile）—— make -f Makefile.guard check
+# 语言：Lua / shell（ipk 构建见 Makefile）
+.PHONY: lint test guard check install-hooks
+
+lint:
+	@echo "▸ lint"
+	@fail=0; for f in $$(find luasrc -name "*.lua" 2>/dev/null); do luac -p "$$f" || fail=1; done; exit $$fail
+
+test:
+	@echo "▸ test"
+	@echo "(E 阶段补测试)"
+
+guard:
+	@echo "▸ guard（安全红线）"
+	@sh .githooks/guard.sh
+
+check: guard lint test
+	@echo "✓ check 通过"
+
+install-hooks:
+	@git config core.hooksPath .githooks
+	@chmod +x .githooks/*
+	@echo "✓ hooks 已安装（core.hooksPath = .githooks）"
