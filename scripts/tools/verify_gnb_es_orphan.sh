@@ -102,7 +102,7 @@ report)
         [ -d "/proc/$pid" ] || continue
         cmd=$(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null)
         exe=$(readlink /proc/$pid/exe 2>/dev/null)
-        ppid=$(awk '{print $$4}' /proc/$pid/stat 2>/dev/null)
+        ppid=$(awk '{print $4}' /proc/$pid/stat 2>/dev/null)
         echo "pid=$pid ppid=$ppid exe=$exe"
         echo "  cmd=$cmd"
     done
