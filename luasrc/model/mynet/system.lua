@@ -503,6 +503,10 @@ end
 --              firewall.refresh / client.report
 -- nid_str/pub_hex: 用于命令结果回调签名（可选；缺省则不回调）
 -- ─────────────────────────────────────────────────────────────
+-- E-4（目标态）：Lua 职责收窄为**纯执行器**。
+--   mynetd 负责心跳组装 + WS 上报；Lua 只执行命令并把结果**回 mynetd**，
+--   由 mynetd 经 WS 上报——不再自己 submit_heartbeat / _report 到 back。
+--   当前仍保留 submit_heartbeat 作兼容；迁移完成后删除。
 function M._handle_heartbeat_commands(commands, node_id, nid_str, pub_hex)
     if type(commands) ~= "table" or #commands == 0 then return end
     local node_m = require("luci.model.mynet.node")

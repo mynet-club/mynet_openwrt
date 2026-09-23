@@ -56,54 +56,53 @@ else
 fi
 
 # ── GNB peer 健康检查 + 自愈重启 ────────────────────────────────
-# 逻辑：proxy 运行中 → peer VIP 不可达 → 重启 GNB 进程（仅进程，不动路由/防火墙）
-# 背景：GNB 初次打洞失败后指数退避重试，可能长达 1 小时不自愈；restart 即可恢复
+# E-3 判据改造（2026-09-23）：
+#   旧判据 = proxy_state.json 存在 + PROXY_GATEWAYS 首个 peer VIP 不可达
+#            ——完全依赖已下架的 mynet_proxy，必须先改造再搬
+#   新判据 = gnb_ctl -s 的 PONG 状态 / ping 对端 VPN IP
+# 保留隐性知识：15 分钟冷却 + 启动 90s 宽限（持续不通时防循环抖动）
 _gnb_peer_heal() {
-    local state_file="${MYNET_HOME}/var/proxy_state.json"
-    local role_conf="${MYNET_HOME}/conf/proxy/proxy_role.conf"
     local heal_ts_file="/var/run/mynet_gnb_heal.ts"
-    local HEAL_COOLDOWN=900   # 15 分钟内只重启一次，避免持续不通时循环抖动
+    local HEAL_COOLDOWN=900   # 15 分钟内只重启一次
+    local boot_ts_file="/var/run/mynet_gnb_heal.boot"
 
-    # proxy 是否在运行（state 文件存在）
-    [ -f "$state_file" ] || return 0
-
-    # proxy 运行超过 90s 后才检测（避免刚启动打洞尚未完成）
-    local start_ts
-    start_ts=$(grep -o '"start_ts":[0-9]*' "$state_file" | grep -o '[0-9]*$')
-    [ -z "$start_ts" ] && return 0
+    # 启动 90s 宽限：以本脚本首次运行时间近似 GNB 启动
     local now_ts; now_ts=$(date +%s)
-    local age=$((now_ts - start_ts))
-    if [ "$age" -lt 90 ]; then
-        _log "peer-heal: proxy just started (${age}s ago), skip"
+    if [ ! -f "$boot_ts_file" ]; then
+        echo "$now_ts" > "$boot_ts_file"
+        return 0
+    fi
+    local boot_ts; boot_ts=$(cat "$boot_ts_file" 2>/dev/null)
+    if [ -n "$boot_ts" ] && [ $((now_ts - boot_ts)) -lt 90 ]; then
+        _log "peer-heal: within 90s grace, skip"
         return 0
     fi
 
-    # 冷却检查：距上次重启不足 HEAL_COOLDOWN 秒则跳过
+    # 冷却
     if [ -f "$heal_ts_file" ]; then
         local last_heal; last_heal=$(cat "$heal_ts_file" 2>/dev/null)
         if [ -n "$last_heal" ] && [ $((now_ts - last_heal)) -lt $HEAL_COOLDOWN ]; then
-            return 0   # 静默跳过，不写日志（每次心跳都跑会刷屏）
+            return 0
         fi
     fi
 
-    # 读取第一个 peer VIP（PROXY_GATEWAYS=10.x.x.x，逗号分隔时取第一个）
-    [ -f "$role_conf" ] || return 0
-    local peer_vip
-    peer_vip=$(grep '^PROXY_GATEWAYS=' "$role_conf" | head -1 \
-               | sed 's/^PROXY_GATEWAYS=//' | cut -d, -f1 | tr -d '"')
-    [ -z "$peer_vip" ] && return 0
-
-    # ping 3 次，总 deadline 8s（BusyBox ping -w = total deadline）
-    if ping -c 3 -w 8 "$peer_vip" >/dev/null 2>&1; then
-        return 0   # peer 可达，不处理
+    # 新判据：gnb_ctl -s 找无 PONG 的 peer；或对 peer VPN IP ping 失败
+    local status_out peer_vip
+    status_out=$(gnb_ctl -s 2>/dev/null) || return 0
+    # 取第一个仍无 PONG 的 peer 的 VPN IP（格式随 gnb_ctl -s 输出；尽力解析）
+    peer_vip=$(printf '%s\n' "$status_out" | awk '/PONG/{next} /10\./{print $NF; exit}')
+    if [ -z "$peer_vip" ]; then
+        # 全部 PONG 或无法解析 → 不 heal
+        return 0
     fi
 
-    _log "peer-heal: $peer_vip unreachable — restarting GNB..."
+    if ping -c 3 -w 8 "$peer_vip" >/dev/null 2>&1; then
+        return 0
+    fi
 
-    # 记录重启时间戳（冷却期开始）
+    _log "peer-heal: $peer_vip unreachable (no PONG) — restarting GNB..."
     echo "$now_ts" > "$heal_ts_file"
 
-    # 仅重启 GNB 进程（node.restart_gnb = stop_gnb + start_gnb，不动路由/防火墙）
     lua -e "
 local node = require('luci.model.mynet.node')
 local cfg  = require('luci.model.mynet.config')
