@@ -6,7 +6,8 @@
 #
 # 用法（实机 root）：
 #   sh verify_gnb_es_orphan.sh           # 现状报告
-#   sh verify_gnb_es_orphan.sh --crash   # 杀 gnb 模拟崩溃，观察 gnb_es（会短暂断流）
+#   GNB_PID=1234 sh verify_gnb_es_orphan.sh --crash
+#   GNB_CONF=/etc/mynet/driver/gnb/conf/<id> sh verify_gnb_es_orphan.sh --crash
 #   sh verify_gnb_es_orphan.sh --clean   # 清理孤儿 gnb_es（仅本安装路径）
 #
 # 退出码：0=无孤儿/清理完成；1=发现孤儿且未 --clean；2=环境不满足
@@ -63,10 +64,8 @@ report)
         gpid=$(pgrep -f "gnb -c $GNB_CONF" 2>/dev/null | head -1)
     fi
     if [ -z "$gpid" ]; then
-        gpid=$(pgrep -f "gnb -c /tmp/t1-gnb" 2>/dev/null | head -1)
-    fi
-    if [ -z "$gpid" ]; then
-        log "no target gnb (set GNB_PID or GNB_CONF); refuse to kill by name"
+        # 铁律：禁止按名字杀。必须显式 GNB_PID 或 GNB_CONF
+        log "refuse: set GNB_PID=<pid> or GNB_CONF=<confdir> (never kill by name)"
         exit 2
     fi
     before=$(count_gnb_es)
