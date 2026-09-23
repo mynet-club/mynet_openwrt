@@ -93,8 +93,28 @@ report)
     done
     log "clean done; remaining=$(count_gnb_es)"
     ;;
+--inspect)
+    # 定位失明时的人工判断台：只列候选，不杀
+    # 何时失明：conf 目录改名/迁移、符号链接启动、sudo 壳进程、PID 复用
+    # 注意：改端口**不会**失明——cmdline 只有 -c <conf_dir>，端口在 node.conf 里
+    echo "=== gnb / gnb_es 候选（人工判断，不自动杀）==="
+    for pid in $(pidof gnb 2>/dev/null) $(pidof gnb_es 2>/dev/null); do
+        [ -d "/proc/$pid" ] || continue
+        cmd=$(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null)
+        exe=$(readlink /proc/$pid/exe 2>/dev/null)
+        ppid=$(awk '{print $$4}' /proc/$pid/stat 2>/dev/null)
+        echo "pid=$pid ppid=$ppid exe=$exe"
+        echo "  cmd=$cmd"
+    done
+    echo "--- 端口占用 ---"
+    netstat -uln 2>/dev/null | grep -E ':(90[0-9][0-9]|92[0-9][0-9])' || true
+    echo "--- TUN ---"
+    ip -o link show 2>/dev/null | grep -E 'gnb|tun' || true
+    ;;
 *)
-    echo "usage: $0 [report|--crash|--clean]"
+    echo "usage: $0 [report|--inspect|--crash|--clean]"
+    echo "  --inspect  列候选供人工判断（conf 改名/符号链接/sudo 壳/PID 复用时用）"
+    echo "  --crash    需 GNB_PID 或 GNB_CONF"
     exit 2
     ;;
 esac
