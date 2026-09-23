@@ -463,35 +463,17 @@ end
 -- 与心跳同样使用 HMAC-SHA256 Node-Sig 认证
 -- ─────────────────────────────────────────────────────────────
 function M._report_command_result(cmd_id, nid_str, pub_hex, ok, message)
-    if not cmd_id or not pub_hex or pub_hex == "" then return end
-    local cfg_m = require("luci.model.mynet.config")
-
-    local ts = os.time()
-    local urlpath = "/api/v2/monitor/commands/" .. tostring(cmd_id) .. "/result"
-    -- 与 client 端字段保持一致：success + message
+    if not cmd_id then return end
+    -- E-4：结果回 mynetd（纯执行器），由 mynetd 经 WS 上报——不再直连 back
     local body = string.format(
-        '{"success":%s,"message":%s}',
+        '{"id":"%s","ok":%s,"message":%s,"source":"lua"}',
+        tostring(cmd_id),
         ok and "true" or "false",
         util.json_encode(message or "") or '""')
-
-    local sign_msg = string.format("PATCH|%s|%d|%s", urlpath, ts, body)
-    local sig_hex  = util.hmac_sha256(pub_hex, sign_msg)
-    if not sig_hex then return end
-    local sig_b64 = util.hex_to_base64(sig_hex)
-    if not sig_b64 then return end
-
-    local api_base = cfg_m.get_api_url():match("^(https?://[^/]+)") or "https://api.mynet.club"
-    local full_url = (api_base .. urlpath):gsub("'", "'\\''")
-    local safe_body = body:gsub("'", "'\\''")
     local cmd = string.format(
-        "curl -s -m 15 -X PATCH"
-        .. " -H 'Content-Type: application/json'"
-        .. " -H 'X-Node-Id: %s'"
-        .. " -H 'X-Timestamp: %d'"
-        .. " -H 'X-Node-Signature: %s'"
-        .. " --data '%s'"
-        .. " '%s' >/dev/null 2>&1",
-        nid_str, ts, sig_b64, safe_body, full_url)
+        "curl -s -m 3 -X POST -H 'Content-Type: application/json'"
+        .. " --data '%s' 'http://127.0.0.1:8096/api/v1/command-result' >/dev/null 2>&1",
+        body:gsub("'", "'\\''"))
     os.execute(cmd)
 end
 
@@ -660,6 +642,10 @@ end
 -- 返回: (response_table, nil) 或 (nil, error_string)
 -- ─────────────────────────────────────────────────────────────
 function M.submit_heartbeat(node_id)
+    -- E-4：mynetd 在跑时 Lua 不再自报心跳（心跳归 mynetd）
+    if util.file_exists("/var/run/mynetd.pid") or os.execute("pidof mynetd >/dev/null 2>&1") == 0 then
+        return { success = true, skipped = "mynetd-active" }, nil
+    end
     local cfg_m  = require("luci.model.mynet.config")
     local api_m  = require("luci.model.mynet.api")
     local node_m = require("luci.model.mynet.node")
@@ -741,6 +727,10 @@ end
 -- 返回: (true, nil) 或 (nil, error_string)
 -- ─────────────────────────────────────────────────────────────
 function M.run_daemon_heartbeat()
+    -- E-4：mynetd 常驻时本入口退化为 no-op（cron 兼容保留）
+    if util.file_exists("/var/run/mynetd.pid") or os.execute("pidof mynetd >/dev/null 2>&1") == 0 then
+        return true, "skipped: mynetd-active"
+    end
     local cfg_m = require("luci.model.mynet.config")
 
     -- 读取 NODE_ID
