@@ -1,10 +1,9 @@
 #!/bin/sh /etc/rc.common
 # MyNet VPN 服务脚本
 #
-# E-1（进行中）：目标态 procd 接管 mynetd（respawn / SIGHUP reload）。
-# 完整 procd 样例见 rc.mynet.procd.snippet。
-# 切换前请在实机跑 /etc/mynet/scripts/tools/verify_gnb_es_orphan.sh --crash
-# 当前仍用 rc.common start/stop + Lua 委托——待 gnb_es 孤儿验证后切换。
+# E-1：procd 接管 GNB（2026-09-23 切换）。
+# 前置已通过：verify_gnb_es_orphan.sh --crash → PASS（gnb SIGKILL 后 gnb_es 1s 内清空）。
+# respawn 只拉 gnb；gnb_es 随父进程退出（实测），无需单独回收。
 #
 # 架构:
 #   Shell  — 配置加载、路由/防火墙脚本调用、插件钩子
@@ -16,6 +15,7 @@ if [ -z "$IPKG_INSTROOT" ] && \
     exit 1
 fi
 
+USE_PROCD=1
 START=99
 STOP=10
 EXTRA_COMMANDS="status install"
@@ -61,62 +61,59 @@ run_plugin_hooks() {
     done
 }
 
-# ── start ───────────────────────────────────────────────────────
-start() {
-    log "Starting MyNet service..."
+# ── start（procd 托管 GNB）────────────────────────────────────
+start_service() {
+    log "Starting MyNet service (procd)..."
     load_config || return 1
     run_plugin_hooks "pre_start"
 
-    # GNB 启动完全委托给 Lua
-    # node.start_gnb: pre-flight → spawn → 等待 TUN (5s) → 记录 gnb_es
-    log "Starting GNB (delegating to Lua)..."
-    if ! lua <<'LUA'
-local node = require("luci.model.mynet.node")
-local cfg  = require("luci.model.mynet.config")
-local nid  = cfg.get_node_id()
-if not nid then
-    io.write("[MyNet] ERROR: NODE_ID not configured in mynet.conf\n"); os.exit(1)
-end
-if node.gnb_is_running(nid) then
-    local util = require("luci.model.mynet.util")
-    io.write("[MyNet] ERROR: GNB already running (node " .. util.int_str(nid) .. ")\n")
-    os.exit(1)
-end
-local ok, err = node.start_gnb(nid)
-if not ok then
-    io.write("[MyNet] ERROR: GNB start failed: " .. (err or "unknown") .. "\n"); os.exit(1)
-end
-io.write("[MyNet] GNB process started\n")
-LUA
-    then
-        log "ERROR: GNB start failed, aborting"
+    local nid confdir bin
+    nid=$(get_node_id_from_conf)
+    confdir="${MYNET_HOME}/driver/gnb/conf/${nid}"
+    bin="${MYNET_HOME}/driver/gnb/bin/gnb"
+    [ -x "$bin" ] || bin="$(command -v gnb)"
+    if [ -z "$nid" ] || [ ! -d "$confdir" ] || [ -z "$bin" ]; then
+        log "ERROR: gnb not ready (nid=$nid conf=$confdir bin=$bin)"
         return 1
     fi
 
-    log "GNB started, configuring network..."
+    # E-2：node.conf 必须 daemon off，交给 procd 前台
+    if [ -f "$confdir/node.conf" ]; then
+        sed -i 's/^daemon on$/daemon off/' "$confdir/node.conf" 2>/dev/null || true
+    fi
 
-    # 防火墙 NAT masq
+    log "Starting GNB via procd ($bin -c $confdir)"
+    procd_open_instance gnb
+    procd_set_param command "$bin" -c "$confdir"
+    # 实测 --crash PASS：孤儿不堆积；respawn 安全
+    procd_set_param respawn 3600 5 5
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_set_param file "$confdir/node.conf"
+    procd_close_instance
+
+    # 网络：防火墙 / 路由（与 GNB 生命周期并列）
     if [ -f "$MYNET_HOME/scripts/firewall.mynet" ]; then
-        log "Configuring firewall..."
         MYNET_HOME="$MYNET_HOME" sh "$MYNET_HOME/scripts/firewall.mynet" \
             start --interface "$VPN_INTERFACE" \
             || log "WARNING: Firewall configuration failed"
-    else
-        log "WARNING: Firewall script not found: $MYNET_HOME/scripts/firewall.mynet"
     fi
-
-    # 路由
     if [ -f "$MYNET_HOME/scripts/route.mynet" ]; then
-        log "Configuring routes..."
         MYNET_HOME="$MYNET_HOME" sh "$MYNET_HOME/scripts/route.mynet" \
             start --config "$ROUTE_CONFIG" --interface "$VPN_INTERFACE" \
             || log "WARNING: Route configuration failed"
-    else
-        log "WARNING: Route script not found: $MYNET_HOME/scripts/route.mynet"
     fi
 
     run_plugin_hooks "post_start"
     log "MyNet service started successfully"
+}
+
+# 兼容旧 rc.common 调用
+start() { start_service; }
+
+get_node_id_from_conf() {
+    if [ -n "$NODE_ID" ]; then echo "$NODE_ID"; return; fi
+    sed -n 's/^NODE_ID=//p' "$CONFIG_FILE" 2>/dev/null | head -1
 }
 
 # ── stop ────────────────────────────────────────────────────────
