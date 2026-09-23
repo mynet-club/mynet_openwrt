@@ -56,10 +56,17 @@ report)
     log "no orphans"
     ;;
 --crash)
-    # 模拟崩溃：杀 gnb 主进程，观察 3s 内 gnb_es 是否被回收
-    gpid=$(pidof gnb 2>/dev/null | awk '{print $1}')
+    # 模拟崩溃：杀 **指定实例** 的 gnb，观察 gnb_es 是否被回收
+    # 多实例安全：优先 GNB_PID / GNB_CONF cmdline 匹配，绝不 pidof 取第一个
+    gpid="${GNB_PID:-}"
+    if [ -z "$gpid" ] && [ -n "$GNB_CONF" ]; then
+        gpid=$(pgrep -f "gnb -c $GNB_CONF" 2>/dev/null | head -1)
+    fi
     if [ -z "$gpid" ]; then
-        log "gnb not running, cannot crash-test"
+        gpid=$(pgrep -f "gnb -c /tmp/t1-gnb" 2>/dev/null | head -1)
+    fi
+    if [ -z "$gpid" ]; then
+        log "no target gnb (set GNB_PID or GNB_CONF); refuse to kill by name"
         exit 2
     fi
     before=$(count_gnb_es)

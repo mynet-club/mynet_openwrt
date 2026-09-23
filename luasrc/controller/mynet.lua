@@ -1667,17 +1667,19 @@ end
 
 function api_mynetd_stop()
     if not require_local_api() then return end
+    -- 多实例安全：优先 procd/init.d，回退精确 PID（不用 pkill -x）
+    util.exec_status("/etc/init.d/mynetd stop 2>/dev/null")
     local _, pid = get_mynetd_status()
     if pid then util.exec_status("kill " .. pid .. " 2>/dev/null") end
-    util.exec_status("pkill -x mynetd 2>/dev/null")
     json_ok({ success = true, message = "mynetd stopped" })
 end
 
 function api_mynetd_restart()
     if not require_local_api() then return end
+    -- 多实例安全：优先 procd/init.d，回退精确 PID
+    util.exec_status("/etc/init.d/mynetd stop 2>/dev/null")
     local _, pid = get_mynetd_status()
     if pid then util.exec_status("kill " .. pid .. " 2>/dev/null") end
-    util.exec_status("pkill -x mynetd 2>/dev/null")
     local mon = cfg_m.load_monitor_config()
     local bin = mon.mynetd_bin_path
     if util.file_exists(bin) then
@@ -2430,9 +2432,10 @@ function api_guest_start()
 
     -- 停止已有进程 → 启动 GNB（用 shell 后台 &，不用 -d 避免 daemon fork 问题）
     local log_file = conf_dir .. "/gnb.log"
+    -- 多实例安全：只停本 conf 的 gnb（cmdline 匹配），不 killall
     local cmd = string.format(
-        "killall gnb 2>/dev/null; sleep 1; '%s' -c '%s' >>'%s' 2>&1 &",
-        gnb_bin, conf_dir, log_file)
+        "for p in $(pgrep -f 'gnb -c %s' 2>/dev/null); do kill $p 2>/dev/null; done; sleep 1; '%s' -c '%s' >>'%s' 2>&1 &",
+        conf_dir, gnb_bin, conf_dir, log_file)
     os.execute(cmd)
 
     -- 短暂等待确认进程存活
@@ -2450,7 +2453,8 @@ function api_guest_stop()
     if not check_rate_limit(10, "guest") then
         json_err("rate limit", 429); return
     end
-    os.execute("killall gnb 2>/dev/null")
+    -- 多实例安全：只停 guest 实例（cmdline 匹配 conf），不 killall
+    os.execute("for p in $(pgrep -f 'gnb -c /etc/mynet' 2>/dev/null); do kill $p 2>/dev/null; done")
     json_ok({ success = true, message = "GNB 已停止" })
 end
 
@@ -2460,8 +2464,8 @@ function api_guest_reset()
         json_err("rate limit", 429); return
     end
     local guest_m = require("luci.model.mynet.guest")
-    -- 先停止 GNB
-    os.execute("killall gnb 2>/dev/null")
+    -- 先停止 GNB（多实例安全：按 cmdline 匹配，不 killall）
+    os.execute("for p in $(pgrep -f 'gnb -c /etc/mynet' 2>/dev/null); do kill $p 2>/dev/null; done")
     guest_m.reset()
     -- 清除当前节点设置（mynet.conf），避免残留 NODE_ID 导致后续保存 node.conf 出错
     os.execute("rm -f '" .. util.VPN_CONF .. "'")
