@@ -1,14 +1,13 @@
 #!/bin/sh /etc/rc.common
-# MyNet VPN 服务脚本 (thin shell wrapper)
+# MyNet VPN 服务脚本
+#
+# E-1（进行中）：目标态 procd 接管 mynetd（respawn / SIGHUP reload）。
+# 完整 procd 样例见 rc.mynet.procd.snippet。
+# 当前仍用 rc.common start/stop + Lua 委托——待 gnb_es 孤儿验证后切换。
 #
 # 架构:
 #   Shell  — 配置加载、路由/防火墙脚本调用、插件钩子
 #   Lua    — GNB 进程启停、pre-flight 检查、gnb_es 精确清理
-#
-# 注意: GNB 进程管理完全委托给 luci.model.mynet.node
-#       路由/防火墙通过 route.mynet / firewall.mynet shell 脚本执行
-
-# ── 直接运行防护 ────────────────────────────────────────────────
 if [ -z "$IPKG_INSTROOT" ] && \
    [ "$0" != "/etc/init.d/mynet" ] && \
    [ "$(basename "$0")" = "rc.mynet" ]; then
