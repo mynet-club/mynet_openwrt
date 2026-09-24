@@ -179,7 +179,10 @@ define Package/mynet-agent
   CATEGORY:=Network
   TITLE:=MyNet agent (mynetd transport-only)
   DEPENDS:=+libc
-  PKGARCH:=all
+  # ⚠️ **不设 PKGARCH:=all**。本包装的是**编译产物** mynetd，架构相关：
+  # 设成 all 会让同一个 ipk 声称适配 mips/mipsle/arm/mips64 等所有架构，
+  # opkg 不拦、装上去运行期才崩。留空即按目标架构出包（ipk 文件名带 arch 后缀）。
+  # 对比：luci-app-mynet 是纯 Lua/JS 壳，那个 PKGARCH:=all 是对的。
 endef
 
 define Package/mynet-agent/description
@@ -189,8 +192,19 @@ endef
 
 define Package/mynet-agent/install
 	$(INSTALL_DIR) $(1)/usr/sbin
-	# 构建时放入 files/mynetd（GOOS=linux GOARCH 对应 mips/mipsle）
-	[ -f ./files/mynetd ] && $(INSTALL_BIN) ./files/mynetd $(1)/usr/sbin/mynetd || true
+	# ⚠️ 这里**不能**用 `[ -f ./files/mynetd ] && … || true` 兜底。
+	# 那样在缺文件时构建会静默成功，产出一个不含 mynetd 的空壳 ipk：
+	# opkg 装得上、init 脚本也在，但 /usr/sbin/mynetd 不存在，服务起不来；
+	# 而且构建日志里一行错误都没有 —— 正是 §7.1 D1 说的「静默失败即纸面达成」。
+	# 缺文件必须**炸出来**并告诉人怎么补。
+	@if [ ! -f ./files/mynetd ]; then \
+		echo "ERROR: 缺 ./files/mynetd —— mynet-agent 包必须带二进制，拒绝产出空壳 ipk。" >&2; \
+		echo "       补法：把目标架构的 mynetd 放到 ./files/mynetd" >&2; \
+		echo "       来源：mynet_agent 的 make dist 产物（GOOS=linux）" >&2; \
+		echo "       ⚠️ 注意 Go 的 mipsle 在 OpenWrt/ctl 侧叫 mipsel" >&2; \
+		exit 1; \
+	fi
+	$(INSTALL_BIN) ./files/mynetd $(1)/usr/sbin/mynetd
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./scripts/runtime/mynetd.init $(1)/etc/init.d/mynetd
 endef

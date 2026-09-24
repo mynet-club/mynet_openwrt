@@ -4,11 +4,22 @@
 
 lint:
 	@echo "▸ lint"
-	@fail=0; for f in $$(find luasrc -name "*.lua" 2>/dev/null); do luac -p "$$f" || fail=1; done; exit $$fail
+	@if command -v luac >/dev/null 2>&1; then \
+		ver=$$(luac -v 2>&1 | head -1); \
+		case "$$ver" in \
+			*5.1*) ;; \
+			*) echo "  ⚠️ 本机 luac 不是 5.1（$${ver}），而 OpenWrt 用的是 Lua 5.1："; \
+			   echo "     语法兼容性靠人守 —— 5.2+ 的 // | goto <const> 等本地会放过、OpenWrt 才炸。"; \
+			   echo "     已知本仓代码用 5.1 语义（controller 里 module(..., package.seeall)）。" ;; \
+		esac; \
+		fail=0; for f in $$(find luasrc -name "*.lua" 2>/dev/null); do luac -p "$$f" || fail=1; done; exit $$fail; \
+	else \
+		echo "  ⚠️ 已跳过：缺 luac（装 lua 后启用）。**这不是通过**"; \
+	fi
 
 test:
 	@echo "▸ test"
-	@echo "(E 阶段补测试)"
+	@sh scripts/tools/check_agent_pkg.sh
 
 guard:
 	@echo "▸ guard（安全红线）"
