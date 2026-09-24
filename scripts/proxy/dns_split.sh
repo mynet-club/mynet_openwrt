@@ -58,7 +58,7 @@ cmd_setup() {
         all_dns="${foreign_dns},${fallback_ip}"
         echo "[dns-split]   兜底 DNS: $fallback_ip ($fallback_host)"
     else
-        echo "[dns-split] ⚠ 无法解析 $fallback_host，跳过兜底 DNS"
+        echo "[dns-split] ⚠ 无法解析 ${fallback_host}，跳过兜底 DNS"
     fi
 
     # 配置 dnsmasq 默认上游为国内 DNS (UCI)
@@ -255,7 +255,7 @@ case "${1:-}" in
         echo ""
         echo "默认: 国内 DNS = $DEFAULT_DOMESTIC_DNS"
         echo "      国外 DNS = $DEFAULT_FOREIGN_DNS"
-        echo "      兜底 DNS = $DEFAULT_FALLBACK_DNS_HOST（启动时解析为 IP）"
+        echo "      兜底 DNS = ${DEFAULT_FALLBACK_DNS_HOST}（启动时解析为 IP）"
         exit 1
         ;;
 esac

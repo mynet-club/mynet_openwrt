@@ -535,7 +535,7 @@ start_dns_intercept() {
     local _peer="${PROXY_GATEWAYS%%,*}"
     if [ -n "$_peer" ] && [ "$dns_server" != "$_peer" ]; then
         ip route replace "${dns_server}/32" dev "$GNB_INTERFACE" 2>/dev/null && \
-            echo "[INFO] DNS 路由: ${dns_server}/32 → $GNB_INTERFACE（非 peer，强制走隧道）"
+            echo "[INFO] DNS 路由: ${dns_server}/32 → ${GNB_INTERFACE}（非 peer，强制走隧道）"
         # 记录 DNS server，用于 stop 时清理路由
         mkdir -p "$MYNET_HOME/var" 2>/dev/null
         echo "$dns_server" > "$MYNET_HOME/var/dns_route_pin"
