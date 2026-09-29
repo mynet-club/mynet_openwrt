@@ -116,11 +116,14 @@ define Package/luci-app-mynet/install
 		$(1)/usr/share/rpcd/acl.d/
 
 	# --- i18n translations ---
+	# ⚠️ 不要写 $(basename)/$(dirname) —— GNU make 会先当内建函数吃掉。
+	# 用 sed 从路径截 lang。
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/i18n
 	for pofile in $(CURDIR)/po/*/mynet.po; do \
-		lang=$$(basename $$(dirname $$pofile)); \
-		python3 $(CURDIR)/tools/po2lmo.py $$pofile \
-			$(1)/usr/lib/lua/luci/i18n/mynet.$$lang.lmo; \
+		[ -f "$$$$pofile" ] || continue; \
+		lang=$$$$(echo "$$$$pofile" | sed 's|.*/po/||;s|/.*||'); \
+		python3 $(CURDIR)/tools/po2lmo.py "$$$$pofile" \
+			$(1)/usr/lib/lua/luci/i18n/mynet.$$$$lang.lmo; \
 	done
 endef
 
@@ -186,7 +189,8 @@ define Package/mynet-agent
 endef
 
 define Package/mynet-agent/description
-  mynetd 纯通信层（心跳/WS/命令分派）。系统能力在 mynet 执行器。
+  mynetd 纯通信层（心跳/WS/命令分派）+ mynet L6 执行器（apply 唯一写入者）。
+  OpenWrt 命令执行走 lua -e（MYNET_EXECUTOR=lua），路由落盘仍调 mynet apply。
   产物名 mynet_agent_openwrt_*（E-8）。
 endef
 
@@ -204,7 +208,15 @@ define Package/mynet-agent/install
 		echo "       ⚠️ 注意 Go 的 mipsle 在 OpenWrt/ctl 侧叫 mipsel" >&2; \
 		exit 1; \
 	fi
+	# mynet 是 L6 唯一写入者（route-apply-unification）。Lua 的 apply_routes
+	# 会 shell 出去调它；缺了则路由装不上——同样不允许静默空壳。
+	@if [ ! -f ./files/mynet ]; then \
+		echo "ERROR: 缺 ./files/mynet —— 路由唯一写入者是 mynet apply，拒绝产出空壳 ipk。" >&2; \
+		echo "       补法：把目标架构的 mynet 放到 ./files/mynet（与 mynetd 同一 dist）" >&2; \
+		exit 1; \
+	fi
 	$(INSTALL_BIN) ./files/mynetd $(1)/usr/sbin/mynetd
+	$(INSTALL_BIN) ./files/mynet $(1)/usr/sbin/mynet
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./scripts/runtime/mynetd.init $(1)/etc/init.d/mynetd
 endef
