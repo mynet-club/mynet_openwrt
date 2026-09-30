@@ -9,8 +9,16 @@ local auth = require("luci.model.mynet.auth")
 local cfg  = require("luci.model.mynet.config")
 local util = require("luci.model.mynet.util")
 
--- 安全整数字符串：避免 Lua 大整数变成科学计数法
-local function nid(v) return util.int_str(v) end
+-- 安全整数字符串：避免 Lua 大整数变成科学计数法。
+-- ⚠️ v 为 nil/空时**必须回退到当前节点**，否则路径会变成 conf/0/：
+-- check_config 找不到文件，stop_gnb 读空 pidfile 还返回 true（静默假成功）。
+-- 实测坑：mynetd 分派 service stop 不带 --node-id，全走这条。
+local function nid(v)
+    if v == nil or v == "" then
+        v = cfg.get_node_id()
+    end
+    return util.int_str(v)
+end
 
 -- 鉴权 + zone 上下文（减少重复模板）
 local function auth_context()
@@ -1064,18 +1072,17 @@ local function build_route_table(entries, self_nid)
         end
     end
 
-    local peer_routes = {} -- cross-zone /32 via selfVpnIp
+    local peer_routes = {} -- overlay /32 host routes（含同网段）
     local gw_routes = {}   -- subnet via peerVpnIp
 
     for _, nid_key in ipairs(node_order) do
         local node_entries = by_node[nid_key]
         local peer_vpn_ip = node_entries[1].network
 
-        -- 同子网判断
-        local in_same_subnet = self_vpn_ip and
-            (math.floor(ip_to_int(peer_vpn_ip) / 256) * 256 == vpn_net)
-
-        if not in_same_subnet and self_vpn_ip then
+        -- overlay 一律 /32（node-connectivity-checklist：绝不发对端整个 /24）。
+        -- tun 自身是 /32，同网段 peer **没有** 连通 /24 可依，
+        -- 必须与跨网段一样写 /32，否则 180/188 这类同段出口不可达。
+        if self_vpn_ip then
             peer_routes[#peer_routes + 1] = {
                 node_id = nid_key,
                 network = peer_vpn_ip,
@@ -1236,17 +1243,40 @@ local function wait_and_kill_gnb_es(pids, timeout_sec)
     end
 end
 
+-- 按 conf 目录精确找 gnb 主进程 PID（多实例安全）。
+-- 为什么必须有：pidfile 会失步（$! 写的是短命父进程、或上次 start 失败残留），
+-- 只信 pidfile 会让 stop_gnb 空杀、start_gnb 误判「没在跑」再起第二个抢端口。
+-- 安全红线：不用 pkill/killall，只按 /proc/*/cmdline 匹配本实例 conf 路径。
+local function find_gnb_pid_by_conf(node_id)
+    local conf_dir = string.format("%s/%s", util.GNB_CONF_DIR, nid(node_id))
+    local out = util.exec("pidof gnb 2>/dev/null") or ""
+    for pid_str in out:gmatch("%d+") do
+        local cmdline = util.read_file("/proc/" .. pid_str .. "/cmdline") or ""
+        if cmdline:find(conf_dir, 1, true) then
+            return tonumber(pid_str)
+        end
+    end
+    return nil
+end
+
 function M.gnb_is_running(node_id)
     local pidfile = gnb_pidfile(node_id)
     local pid_str = util.trim(util.read_file(pidfile) or "")
-    if pid_str == "" then return false end
-    local pid = tonumber(pid_str)
-    if not pid then return false end
-    -- 验证 /proc/{pid}/cmdline 包含该节点的 conf 目录（多实例安全）
-    local cmdline = util.read_file("/proc/" .. pid .. "/cmdline")
-    if not cmdline or cmdline == "" then return false end
-    local conf_dir = string.format("%s/%s", util.GNB_CONF_DIR, nid(node_id))
-    return cmdline:find(conf_dir, 1, true) ~= nil
+    if pid_str ~= "" then
+        local pid = tonumber(pid_str)
+        if pid then
+            -- 验证 /proc/{pid}/cmdline 包含该节点的 conf 目录（多实例安全）
+            local cmdline = util.read_file("/proc/" .. pid .. "/cmdline")
+            if cmdline and cmdline ~= "" then
+                local conf_dir = string.format("%s/%s", util.GNB_CONF_DIR, nid(node_id))
+                if cmdline:find(conf_dir, 1, true) then
+                    return true
+                end
+            end
+        end
+    end
+    -- pidfile 失步时按 conf 路径扫描（见 find_gnb_pid_by_conf 注释）
+    return find_gnb_pid_by_conf(node_id) ~= nil
 end
 
 function M.start_gnb(node_id)
@@ -1305,6 +1335,17 @@ function M.start_gnb(node_id)
         bin, conf, log, pid)
     util.exec(cmd)
 
+    -- ⚠️ `$!` 可能不是最终 gnb PID（父进程退出/二次 fork 时会失步）。
+    -- 等进程起来后按 conf 路径回写真实 PID，否则 stop_gnb 会空杀。
+    for _ = 1, 5 do
+        local real = find_gnb_pid_by_conf(node_id)
+        if real then
+            util.write_file(pid, tostring(real))
+            break
+        end
+        util.exec("sleep 1")
+    end
+
     -- 等待 TUN 接口就绪（最多 5 秒）
     local iface = cfg.get_vpn_interface()
     local tun_ready = false
@@ -1335,19 +1376,32 @@ end
 function M.stop_gnb(node_id)
     save_svc_state(M.SVC_STATE.STOPPING, "killing gnb")
     local pidfile = gnb_pidfile(node_id)
+
+    -- 先信 pidfile（cmdline 校验），失步则按 conf 路径扫——见 find_gnb_pid_by_conf
+    local target = nil
     local pid_str = util.trim(util.read_file(pidfile) or "")
-    local es_pids = {}
     if pid_str ~= "" then
         local pid_num = tonumber(pid_str)
         if pid_num then
-            -- 杀 gnb 前：记录其 gnb_es 子进程 PID（PPID 匹配）
-            es_pids = find_child_gnb_es(pid_num)
-            util.exec("kill " .. pid_num .. " 2>/dev/null; true")
-            util.exec("sleep 1")
-            util.exec("kill -9 " .. pid_num .. " 2>/dev/null; true")
+            local cmdline = util.read_file("/proc/" .. pid_num .. "/cmdline") or ""
+            local conf_dir = string.format("%s/%s", util.GNB_CONF_DIR, nid(node_id))
+            if cmdline:find(conf_dir, 1, true) then
+                target = pid_num
+            end
         end
-        util.exec("rm -f '" .. pidfile .. "'")
     end
+    if not target then
+        target = find_gnb_pid_by_conf(node_id)
+    end
+
+    local es_pids = {}
+    if target then
+        es_pids = find_child_gnb_es(target)
+        util.exec("kill " .. target .. " 2>/dev/null; true")
+        util.exec("sleep 1")
+        util.exec("kill -9 " .. target .. " 2>/dev/null; true")
+    end
+    util.exec("rm -f '" .. pidfile .. "'")
     -- gnb_es 由 gnb fork；优先等待自然退出，超时后仅 kill 本实例的 gnb_es
     -- 若 PPID 方式未找到（gnb 已崩溃），按二进制路径匹配
     if #es_pids == 0 then
@@ -1665,43 +1719,37 @@ local function ip_network_base(ip, netmask)
     return string.format("%d.%d.%d.%d", band(a1, m1), band(a2, m2), band(a3, m3), band(a4, m4))
 end
 
+-- 路由写入统一走 L6 执行器 `mynet apply`（route-apply-unification.md）。
+-- 此前这里直接 parse gnb route.conf + `ip route replace`，与桌面的
+-- network.routes 路径分叉，且没有所有权/冲突闸 —— 现改为委托，
+-- 策略（冲突过滤、只删自己、网关钉扎）只在 mynet/apply_plan.go 一处。
 function M.apply_routes(node_id)
-    local tun = parse_tun_iface(node_id)
-    if not tun then return { ok = false, count = 0, errors = { "cannot determine tun interface" } } end
-
-    local self_nid = nid(node_id)
-    local route_path = string.format("%s/%s/route.conf", util.GNB_CONF_DIR, self_nid)
-    local content = util.trim(util.read_file(route_path) or "")
-    local entries = parse_gnb_route_conf(content)
-    local count = 0
-    local errors = {}
-    for _, e in ipairs(entries) do
-        if e.node_id ~= self_nid then
-            local cidr = netmask_to_cidr(e.netmask)
-            local base = ip_network_base(e.network, e.netmask) or e.network
-            local dest = base .. "/" .. cidr
-            local _, code = util.exec_status(string.format(
-                "ip route replace %s dev %s 2>&1", dest, tun))
-            if code == 0 then
-                count = count + 1
-            else
-                errors[#errors + 1] = "route " .. dest .. " failed"
-            end
-        end
+    local bin = util.mynet_bin()
+    if not bin then
+        return { ok = false, count = 0, errors = { "mynet binary not found (expect /usr/sbin/mynet)" } }
     end
-    util.log_info(string.format("apply_routes: %d route(s) applied for node %s", count, nid(node_id)))
-    return { ok = #errors == 0, count = count, errors = errors }
+    local out, code = util.exec_status(string.format(
+        "MYNET_HOME='%s' '%s' apply --auto 2>&1", util.MYNET_HOME, bin))
+    local ok = (code == 0)
+    if not ok then
+        util.log_warn("apply_routes: mynet apply --auto failed: " .. tostring(out))
+    else
+        util.log_info("apply_routes: mynet apply --auto ok (node " .. tostring(node_id) .. ")")
+    end
+    return { ok = ok, count = 0, errors = ok and {} or { tostring(out) } }
 end
 
 function M.clear_routes(node_id)
-    local tun = parse_tun_iface(node_id)
-    if not tun then return end
-    local out = util.trim(util.exec("ip route show dev " .. tun .. " 2>/dev/null") or "")
-    for line in (out .. "\n"):gmatch("([^\n]*)\n") do
-        local dest = util.trim(line):match("^(%S+)")
-        if dest then
-            util.exec("ip route del " .. dest .. " dev " .. tun .. " 2>/dev/null; true")
-        end
+    local bin = util.mynet_bin()
+    if not bin then
+        util.log_warn("clear_routes: mynet binary not found")
+        return
+    end
+    -- 只清隧道口上的路由（apply --clear 内部按 dev 过滤），不碰系统其他路由
+    local _, code = util.exec_status(string.format(
+        "MYNET_HOME='%s' '%s' apply --clear 2>&1", util.MYNET_HOME, bin))
+    if code ~= 0 then
+        util.log_warn("clear_routes: mynet apply --clear failed (node " .. tostring(node_id) .. ")")
     end
 end
 
@@ -1775,19 +1823,21 @@ function M.apply_firewall(node_id)
         util.exec(string.format("uci set firewall.@forwarding[%d].dest='mynet'", fi))
     end
 
-    -- 提交并重载
-    local _, code = util.exec_status("uci commit firewall 2>&1 && fw4 reload 2>&1 || fw3 reload 2>&1")
-    if code ~= 0 then
-        errors[#errors + 1] = "firewall reload failed"
-    end
+    -- 提交并重载。后台执行：fw4 reload 在部分环境会挂死，不能拖住
+    -- start_service / HTTP 请求（实测 QEMU 上 >45s）。回读状态用 fw4 status。
+    util.exec("uci commit firewall 2>&1")
+    util.exec("(fw4 reload 2>/dev/null || fw3 reload 2>/dev/null) >/tmp/mynet-fw4-reload.log 2>&1 &")
 
     util.log_info("apply_firewall: zone mynet configured for " .. tun)
     return { ok = #errors == 0, errors = errors }
 end
 
 function M.clear_firewall(node_id)
-    -- 不删除 UCI zone（保守策略），仅重载防火墙
-    util.exec("fw4 reload 2>/dev/null || fw3 reload 2>/dev/null; true")
+    -- 不删除 UCI zone（保守策略）。
+    -- ⚠️ 不要在这里同步 fw4 reload：本机没改 UCI 时 reload 纯属多余，
+    -- 而 fw4 reload 在部分环境（QEMU/规则异常）会挂死，会把 stop_service
+    -- 拖到 HTTP 超时。真要刷新防火墙时由 apply_firewall 负责。
+    return true
 end
 
 -- ── 配置校验 ─────────────────────────────────────────────────
@@ -1837,48 +1887,32 @@ function M.check_config(node_id)
 end
 
 -- ── 三层联动：start_service / stop_service ──────────────────
+-- E-1：进程生命周期归 procd。这里只委托 /etc/init.d/mynet，
+-- 不再 Lua spawn/kill gnb（旧路径见 start_gnb/stop_gnb，仅留调试/兼容）。
 
 function M.start_service(node_id)
-    -- 0. Pre-flight check
+    -- pre-flight：配置不齐时别让 procd 空转
     local check = M.check_config(node_id)
     if not check.ok then
         return nil, "config check failed: " .. table.concat(check.errors, "; ")
     end
-
-    -- 1. Start GNB process
-    local ok, err = M.start_gnb(node_id)
-    if not ok then return nil, "gnb start: " .. (err or "unknown") end
-
-    -- 2. Wait for tun interface, apply routes
-    local tun = parse_tun_iface(node_id)
-    if tun then
-        local ready = wait_for_iface(tun, 5)
-        if ready then
-            local rr = M.apply_routes(node_id)
-            if not rr.ok then
-                util.log_warn("start_service: route errors: " .. table.concat(rr.errors, "; "))
-            end
-            -- 3. Apply firewall
-            local fr = M.apply_firewall(node_id)
-            if not fr.ok then
-                util.log_warn("start_service: firewall errors: " .. table.concat(fr.errors, "; "))
-            end
-        else
-            util.log_warn("start_service: tun " .. tun .. " not ready after 5s, skipping routes/fw")
-        end
+    local out, code = util.exec_status("/etc/init.d/mynet start 2>&1")
+    if code == 0 then
+        return true, nil
     end
-
-    return true, nil
+    return nil, (out ~= "" and out) or ("init mynet start failed code=" .. tostring(code))
 end
 
 function M.stop_service(node_id)
-    -- 1. Clear firewall
-    M.clear_firewall(node_id)
-    -- 2. Clear routes
-    M.clear_routes(node_id)
-    -- 3. Stop GNB
-    M.stop_gnb(node_id)
-    return true, nil
+    local out, code = util.exec_status("/etc/init.d/mynet stop 2>&1")
+    if code == 0 then
+        return true, nil
+    end
+    -- stop 在服务未跑时也可能非 0；只要 gnb 已不在就算成功
+    if not M.gnb_is_running(node_id) then
+        return true, nil
+    end
+    return nil, (out ~= "" and out) or ("init mynet stop failed code=" .. tostring(code))
 end
 
 function M.restart_service(node_id)
