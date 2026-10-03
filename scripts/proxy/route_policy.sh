@@ -143,6 +143,8 @@ add_ip_rules() {
 # GNB 可能学到与 WAN 同子网的路由（如 192.168.10.0/24 via gnb_tun），
 # 覆盖 eth1 的直连路由，导致网关不可达。
 # 通过添加 /32 host route 确保网关始终走 WAN 接口。
+# GUARD-OK 代理策略表 200 / DNS /32 的写入点，不是「对端路由」写入者
+# （对端路由唯一入口 = mynet apply，见 spec/route-apply-unification.md）。
 fix_wan_gateway_route() {
     local wan_gw wan_dev
     wan_gw=$(ip route show default | awk '/dev (eth|wan|ppp)/{print $3; exit}')

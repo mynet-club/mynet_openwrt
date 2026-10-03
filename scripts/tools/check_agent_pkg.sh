@@ -62,11 +62,29 @@ else
   ok "装 mynetd 的动作未被 || true 兜底"
 fi
 
+# 2c-2. mynet（L6 唯一写入者）同样必须硬依赖
+if printf '%s\n' "$install_block" | grep -q 'files/mynet'; then
+  ok "install 引用了 files/mynet"
+else
+  bad "install 块没有引用 files/mynet —— 路由唯一写入者缺失时 Lua apply 会断"
+fi
+if printf '%s\n' "$install_block" | grep -E 'INSTALL_BIN.*[[:space:]]mynet' | grep -q '||[[:space:]]*true'; then
+  bad "install 里装 mynet 的动作带 || true"
+else
+  ok "装 mynet 的动作未被 || true 兜底"
+fi
+
 # 2d. 必须存在显式的失败守卫
 if printf '%s\n' "$install_block" | grep -q '\[ ! -f ./files/mynetd \]'; then
   ok "存在显式失败守卫（[ ! -f ./files/mynetd ]）"
 else
   bad "缺少显式失败守卫 —— 缺 files/mynetd 时构建行为未定义"
+  exit 1
+fi
+if printf '%s\n' "$install_block" | grep -q '\[ ! -f ./files/mynet \]'; then
+  ok "存在显式失败守卫（[ ! -f ./files/mynet ]）"
+else
+  bad "缺少显式失败守卫 —— 缺 files/mynet 时构建行为未定义"
   exit 1
 fi
 
@@ -114,6 +132,30 @@ if ( cd "$tmp" && sh -c "$guard" >/dev/null 2>&1 ); then
   ok "files/mynetd 存在时守卫放行"
 else
   bad "files/mynetd 存在时守卫仍然失败 —— 会挡住正常构建"
+fi
+
+# 3d. mynet 守卫：抽出并真跑（与 mynetd 同一套方法，防「写了但没生效」）
+# 注意避开 mynetd 的 `[ ! -f ./files/mynetd ]`（它以 mynet 前缀开头）
+guard_mynet=$(printf '%s\n' "$install_block" | awk '
+  /if \[ ! -f \.\/files\/mynet \]/ { grab = 1 }
+  grab { print }
+  grab && /^[[:space:]]*fi[[:space:]]*$/ { exit }
+' | sed 's/^[[:space:]]*@\{0,1\}//')
+if [ -z "$guard_mynet" ]; then
+  bad "mynet 守卫抽取失败"
+else
+  ( cd "$tmp" && sh -c "$guard_mynet" >/dev/null 2>&1 ) && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    bad "缺 files/mynet 时守卫**没有失败**"
+  else
+    ok "缺 files/mynet 时守卫失败（退出码 ${rc}）"
+  fi
+  : > "$tmp/files/mynet"
+  if ( cd "$tmp" && sh -c "$guard_mynet" >/dev/null 2>&1 ); then
+    ok "files/mynet 存在时守卫放行"
+  else
+    bad "files/mynet 存在时守卫仍然失败"
+  fi
 fi
 
 echo
