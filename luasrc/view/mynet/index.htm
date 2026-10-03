@@ -227,9 +227,13 @@
             </tr>
         </table>
         <div class="cbi-page-actions">
-            <button class="cbi-button cbi-button-apply" onclick="mnApi('vpn_start',   null, this)"><%:Start%></button>
-            <button class="cbi-button cbi-button-remove" onclick="mnApi('vpn_stop',    null, this)"><%:Stop%></button>
-            <button class="cbi-button cbi-button-action" onclick="mnApi('vpn_restart', null, this)"><%:Restart%></button>
+            <!-- U5/U7：危险操作二次确认；aria-label 保证可及名唯一 -->
+            <button class="cbi-button cbi-button-apply" aria-label="启动隧道"
+                onclick="mnApi('vpn_start',   null, this)"><%:Start%></button>
+            <button class="cbi-button cbi-button-remove" aria-label="停止隧道"
+                onclick="mnConfirmStop(this)"><%:Stop%></button>
+            <button class="cbi-button cbi-button-action" aria-label="重启隧道"
+                onclick="mnConfirmRestart(this)"><%:Restart%></button>
         </div>
     </div>
 
@@ -254,6 +258,15 @@
 
     <script>
     window.mnGnbCtlOk = <%=gnb_ctl_ok and 'true' or 'false'%>;
+    /* U5：危险操作确认（停止/重启会断隧道） */
+    window.mnConfirmStop = function(btn) {
+        if (!confirm('<%:Stop the tunnel?%>\n<%:Devices on MyNet will lose access until you start it again.%>')) return;
+        mnApi('vpn_stop', null, btn);
+    };
+    window.mnConfirmRestart = function(btn) {
+        if (!confirm('<%:Restart the tunnel?%>\n<%:Connection will drop briefly.%>')) return;
+        mnApi('vpn_restart', null, btn);
+    };
     window.mnFwSetup = function(btn) {
         btn.disabled = true;
         var st = document.getElementById('mn-fw-setup-status');

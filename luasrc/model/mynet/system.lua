@@ -952,7 +952,8 @@ function M.run_health_check(node_id, vpn_status, fw_info, deps)
             level        = "warn",
             title        = "GNB service stopped",
             detail       = "VPN tunnel is not active",
-            action_label = "Start GNB",
+            -- U7：按钮文案全局唯一，避免与主区「Start」撞名（无障碍/自动化）
+            action_label = "启动 GNB 服务",
             action_api   = "vpn_start",
         })
     end

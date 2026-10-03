@@ -131,7 +131,11 @@ local list_base = luci.dispatcher.build_url('admin/services/mynet/node') .. '?ta
         <tr class="tr">
             <td class="td" colspan="2">
                 <% if node_err then %>
-                <span class="mn-muted mn-small"><%:API error%>: <%=pcdata(node_err)%></span>
+                <%
+                    local util_m = util_m or require("luci.model.mynet.util")
+                    local friendly = util_m.friendly_api_error(node_err)
+                %>
+                <span class="mn-muted mn-small"><%=pcdata(friendly or node_err)%></span>
                 <% else %>
                 <span class="mn-muted mn-small">…</span>
                 <% end %>
