@@ -9,7 +9,7 @@ local M = {}
 -- ─────────────────────────────────────────────────────────────
 
 M.MYNET_HOME  = "/etc/mynet"
-M.APP_VERSION = "2.1.6"
+M.APP_VERSION = "2.1.8"
 M.CONF_DIR    = M.MYNET_HOME .. "/conf"
 M.CRED_FILE   = M.CONF_DIR  .. "/credential.json"
 M.CONFIG_FILE = M.CONF_DIR  .. "/config.json"
@@ -26,6 +26,21 @@ M.FIREWALL_SCRIPT = M.SCRIPTS_DIR .. "/firewall.mynet"
 M.GNB_DRIVER_ROOT = M.MYNET_HOME .. "/driver/gnb"
 M.GNB_BIN_DIR     = M.GNB_DRIVER_ROOT .. "/bin"
 M.GNB_CONF_DIR    = M.GNB_DRIVER_ROOT .. "/conf"
+
+-- L6 执行器（mynet_agent 产物）。路由/防火墙写入唯一入口是 `mynet apply`，
+-- 与桌面/Linux 同一命令链（见 knowledge-base/spec/route-apply-unification.md）。
+function M.mynet_bin()
+    for _, p in ipairs({
+        "/usr/sbin/mynet",
+        "/usr/bin/mynet",
+        M.MYNET_HOME .. "/bin/mynet",
+    }) do
+        if M.file_exists(p) then
+            return p
+        end
+    end
+    return nil
+end
 
 -- ─────────────────────────────────────────────────────────────
 -- JSON（优先使用 luci.jsonc，失败则降级）
@@ -99,6 +114,48 @@ end
 
 -- node_id 格式化（int_str 的别名，模板中使用）
 M.nid_fmt = M.int_str
+
+-- ─────────────────────────────────────────────────────────────
+-- 云端/API 错误的人话化（U1）
+-- 不要把 `api error 401: Unauthenticated.` 这类原文塞进表格行——
+-- 用户看不懂该去登录还是坏了。细节进「原始数据」/日志。
+-- ─────────────────────────────────────────────────────────────
+function M.friendly_api_error(err)
+    if not err or err == "" then return nil end
+    local s = tostring(err)
+    local code = s:match("api error (%d+)")
+    code = tonumber(code)
+    if code == 401 or s:lower():find("unauthenticated", 1, true)
+        or s:lower():find("unauthorized", 1, true) then
+        return "云端未登录或凭证已过期，请到「设置 / 登录」重新登录"
+    end
+    if code == 403 then
+        return "无权限访问该资源（请联系管理员或换账号）"
+    end
+    if code == 404 then
+        return "云端暂无此节点/资源"
+    end
+    if code == 429 then
+        return "请求过于频繁，请稍后再试"
+    end
+    if code and code >= 500 then
+        return "云端服务异常（" .. tostring(code) .. "），稍后重试"
+    end
+    if s:find("timeout", 1, true) or s:find("timed out", 1, true) then
+        return "连接云端超时，请检查网络"
+    end
+    if s:find("Could not resolve", 1, true) or s:find("resolve host", 1, true) then
+        return "无法解析云端域名，请检查 DNS / 网络"
+    end
+    if s:find("Connection refused", 1, true) then
+        return "无法连接云端服务"
+    end
+    -- 其它：保留原文但截断，避免整段 API 噪音占满单元格
+    if #s > 80 then
+        s = s:sub(1, 77) .. "…"
+    end
+    return s
+end
 
 -- 字节数格式化为人类可读字符串
 function M.fmt_bytes(n)
@@ -291,6 +348,12 @@ function M.get_machine_id()
         return M.trim(mac):gsub(":", "")
     end
     return "openwrt-device"
+end
+
+-- Token Binding 设备指纹：同机稳定、异机不同。
+-- 与 agent DeviceFingerprint 同用途（integration-plan §14.4）；OpenWrt 用 machine-id/MAC 即可。
+function M.device_fingerprint()
+    return M.get_machine_id()
 end
 
 -- ─────────────────────────────────────────────────────────────
