@@ -78,6 +78,11 @@ local function auth_headers(token, zone_id)
     if zid ~= "" and zid ~= "0" then
         h["X-Tenant-ID"] = zid
     end
+    -- Token Binding：指纹随请求；与登录绑定不一致则 back 401（integration-plan §14.4）
+    local fp = util.device_fingerprint()
+    if fp and fp ~= "" then
+        h["X-Device-Fingerprint"] = fp
+    end
     return h
 end
 

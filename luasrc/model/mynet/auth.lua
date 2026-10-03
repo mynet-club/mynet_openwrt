@@ -21,11 +21,14 @@ function M.login(email, password)
 
     local api_url    = cfg.get_api_url()
     local machine_id = util.get_machine_id()
+    local fingerprint = util.device_fingerprint()
 
     local payload    = {
         email       = email,
         password    = password,
         device_name = "openwrt-" .. machine_id:sub(1, 8),
+        -- Token Binding：登录时声明设备指纹
+        device_fingerprint = fingerprint,
     }
 
     local data, err  = api.post_json(api_url, "/auth/login", payload)
@@ -47,6 +50,7 @@ function M.login(email, password)
         token         = data.data.auth_token,
         refresh_token = data.data.refresh_token or "",
         machine_id    = machine_id,
+        device_fingerprint = fingerprint,
         created_at    = util.format_time(now),
         expires_at    = util.format_time(now + expires_in),
         zone_id       = util.int_str(data.data.tenant_id or user_info.zone_id or 0),
