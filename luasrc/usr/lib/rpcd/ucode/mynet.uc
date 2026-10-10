@@ -38,11 +38,13 @@ const TABLE = {
 	'keys-sync':    { m: 'post', p: '/api/v1/config/keys', body: [ 'action', 'pub_hex' ] },
 	'switch-node':  { m: 'post', p: '/api/v1/nodes/switch', body: [ 'node_id' ] },
 	'proxy-set':    { m: 'post', p: '/api/v1/plugin/proxy', body: [ 'enabled' ] },
+	// service：action 以**执行器实现**为准（OpenWrt 上 mynetd 走 Lua，
+	// 白名单 = start|stop|reload|restart；**不含 status**，状态请用 status/runtime）
 	service:        { m: 'post', p: '/api/v1/command', argv: {
 		start:   [ 'service', 'start',   'gnb' ],
 		stop:    [ 'service', 'stop',    'gnb' ],
-		restart: [ 'service', 'restart', 'gnb' ],
-		status:  [ 'service', 'status',  'gnb' ]
+		reload:  [ 'service', 'reload',  'gnb' ],
+		restart: [ 'service', 'restart', 'gnb' ]
 	} }
 };
 
