@@ -27,7 +27,7 @@ LuCI / mynet_openwrt 壳
 
 1. 控制面迁至 `mynet_agent` 的 mynetd（HTTP → OpenWrt 侧 ubus 对象）
 2. Lua 只保留：菜单、视图模板、静态资源托管、rpcd ACL
-3. 与 `mynet_back` 的命令通道由 mynetd 承担，与桌面一致
+3. 与 `mynet_api` 的命令通道由 mynetd 承担，与桌面一致
 
 ## 构建
 

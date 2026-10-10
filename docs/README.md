@@ -6,6 +6,7 @@
 
 | 文档 | 内容 |
 |------|------|
+| [AGENT_INTEGRATION_PLAYBOOK.md](AGENT_INTEGRATION_PLAYBOOK.md) | **OpenWrt agent 接入当前规划**：现状证据、原生 LuCI 入口、执行合同、迁移与发行门禁（2026-10-10） |
 | [architecture.md](architecture.md) | 架构设计 |
 | [build.md](build.md) · [deploy.md](deploy.md) | 构建 / 部署 |
 | [openwrt_gw.md](openwrt_gw.md) | 网关与连通 |
