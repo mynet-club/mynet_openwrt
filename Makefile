@@ -51,9 +51,7 @@ define Package/luci-app-mynet/install
 	$(INSTALL_DIR) $(1)/etc/mynet/conf
 	$(INSTALL_CONF) ./root/etc/mynet/conf/config.json $(1)/etc/mynet/conf/
 
-	# --- Init script (rc.mynet → /etc/init.d/mynet) ---
-	$(INSTALL_DIR) $(1)/etc/init.d
-	$(INSTALL_BIN) ./scripts/runtime/rc.mynet $(1)/etc/init.d/mynet
+	# init 不再随包（由 mynet install 从 agent 内嵌模板写出，见 O1）
 
 	# --- Runtime scripts: proxy ---
 	$(INSTALL_DIR) $(1)/etc/mynet/scripts/proxy/hooks
@@ -132,13 +130,9 @@ define Package/luci-app-mynet/postinst
 [ -n "$${IPKG_INSTROOT}" ] && exit 0
 # Clean up legacy _src directory from older versions
 rm -rf /etc/mynet/scripts/_src
-# E-1/E-5：mynetd 由 procd 托管（不再 pkill）
-# 旧「pkill mynetd + cron heartbeat」路径保留为可选（mynet-heartbeat）
-[ -x /etc/init.d/mynetd ] && /etc/init.d/mynetd enable 2>/dev/null || true
-[ -x /etc/init.d/mynetd ] && /etc/init.d/mynetd start 2>/dev/null || true
-# Enable and load tun module
-modprobe tun 2>/dev/null
-# Sync proxy hooks -> plugin/proxy/ (rc.mynet calls scripts/plugin/<plugin>/<hook>.sh)
+# 服务登记**不在本包**：由 mynet-agent 的 postinst 调 `mynet install`
+# （登记唯一 owner；本包不写 init、不 enable/start）。
+# Sync proxy hooks -> plugin/proxy/（文件布局，归包）
 mkdir -p /etc/mynet/scripts/plugin/proxy
 for _h in pre_start post_start stop; do
     _src="/etc/mynet/scripts/proxy/hooks/$${_h}.sh"
@@ -146,27 +140,17 @@ for _h in pre_start post_start stop; do
     [ -f "$$_src" ] && cp -f "$$_src" "$$_dst" && chmod 0755 "$$_dst"
 done
 unset _h _src _dst
-# Install firewall zone
-MYNET_HOME=/etc/mynet sh /etc/mynet/scripts/firewall.mynet install 2>/dev/null
 # Clear LuCI cache
 rm -rf /tmp/luci-*
-# Enable mynet service
-/etc/init.d/mynet enable 2>/dev/null
-# Setup heartbeat cron (every 5 minutes, replaces mynetd)
-mkdir -p /etc/crontabs
-if ! grep -q 'mynet-heartbeat' /etc/crontabs/root 2>/dev/null; then
-    echo '*/5 * * * * /usr/bin/mynet-heartbeat' >> /etc/crontabs/root
-fi
-/etc/init.d/cron reload 2>/dev/null || true
+# firewall zone / env / init 归 `mynet install`（agent 包 postinst 调）
 exit 0
 endef
 
 define Package/luci-app-mynet/prerm
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] && exit 0
-/etc/init.d/mynet stop 2>/dev/null
-/etc/init.d/mynet disable 2>/dev/null
-# Remove heartbeat cron entry
+# 服务注销归 mynet-agent 的 prerm（`mynet uninstall`），本包不动服务
+# Remove legacy heartbeat cron entry
 if [ -f /etc/crontabs/root ]; then
     sed -i '/mynet-heartbeat/d' /etc/crontabs/root
     /etc/init.d/cron reload 2>/dev/null || true
@@ -217,23 +201,36 @@ define Package/mynet-agent/install
 	fi
 	$(INSTALL_BIN) ./files/mynetd $(1)/usr/sbin/mynetd
 	$(INSTALL_BIN) ./files/mynet $(1)/usr/sbin/mynet
-	$(INSTALL_DIR) $(1)/etc/init.d
-	$(INSTALL_BIN) ./scripts/runtime/mynetd.init $(1)/etc/init.d/mynetd
+	# init 不再随包（mynet install 从 agent 内嵌模板写出，见 O1）
 endef
 
 define Package/mynet-agent/postinst
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] && exit 0
-/etc/init.d/mynetd enable 2>/dev/null || true
-/etc/init.d/mynetd start 2>/dev/null || true
+# TUN 模块（ipk 已声明 kmod-tun，这里兜底）
+modprobe tun 2>/dev/null || true
+# 服务装配**委托 `mynet install`**：写内嵌 init(/etc/init.d/{mynet,mynetd}) + env + UCI zone 并 enable/start。
+# 包只落文件，不自己写 init —— 合同「系统登记只有一个 owner」。
+GW="$${MYNET_GATEWAYS:-wss://gw.mynet.club/v1/node/connect}"
+if [ -x /usr/sbin/mynet ]; then
+	/usr/sbin/mynet install --gateways "$$GW" --prefix /usr --home /etc/mynet || \
+		echo "mynet install 失败，请手工执行：mynet install --home /etc/mynet --gateways $$GW" >&2
+else
+	echo "缺 /usr/sbin/mynet —— 服务未装配" >&2
+fi
+# 摘掉旧版遗留的 cron 心跳（防双心跳）
+if [ -f /etc/crontabs/root ]; then
+	sed -i '/mynet-heartbeat/d' /etc/crontabs/root
+	/etc/init.d/cron reload 2>/dev/null || true
+fi
 exit 0
 endef
 
 define Package/mynet-agent/prerm
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] && exit 0
-/etc/init.d/mynetd stop 2>/dev/null || true
-/etc/init.d/mynetd disable 2>/dev/null || true
+# 停服务并清自身登记委托 `mynet uninstall`；--keep-bin：二进制在 /usr/sbin 由 opkg 删
+[ -x /usr/sbin/mynet ] && /usr/sbin/mynet uninstall --home /etc/mynet --keep-bin 2>/dev/null || true
 exit 0
 endef
 
