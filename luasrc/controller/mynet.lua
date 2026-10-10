@@ -1304,27 +1304,51 @@ function api_get_zones()
     json_ok({ success = true, data = zones })
 end
 
+-- O5（D1/D2/D3）：VPN 启停改走桥（LuCI → ubus mynet.service → mynetd → 执行器 → /etc/init.d/mynet）。
+-- 桥不可用（模块/daemon 不在）时**回落**旧直调路径 —— 两者最终都走同一个 procd init，行为等价。
+-- 返回 (ok, code, detail)。
+local function vpn_lifecycle(action)
+    local mod_ok, bridge = pcall(require, "luci.model.mynet.bridge")
+    if mod_ok and bridge then
+        local res = bridge.service(action)
+        if res then
+            if res.success then
+                local out = (type(res.data) == "table" and res.data.stdout) or ""
+                return true, 0, util.trim(out)
+            end
+            local detail = res.detail or res.message or res.error or ""
+            return false, res.status or 1, util.trim(tostring(detail))
+        end
+    end
+    local out, code
+    if action == "start" then
+        out, code = node_m.start_vpn()
+    elseif action == "stop" then
+        out, code = node_m.stop_vpn()
+    else
+        out, code = node_m.restart_vpn()
+    end
+    return code == 0, code, util.trim(out or "")
+end
+
 function api_vpn_start()
     if not require_local_api() then return end
 
-    local output, code = node_m.start_vpn()
-    if code == 0 then
+    local ok, code, detail = vpn_lifecycle("start")
+    if ok then
         json_ok({ success = true, message = "VPN started" })
     else
-        local detail = util.trim(output or "")
-        local hint = _svc_error_hint(detail, "start")
-        json_ok({ success = false, message = hint, detail = detail, code = code })
+        json_ok({ success = false, message = _svc_error_hint(detail, "start"), detail = detail, code = code })
     end
 end
 
 function api_vpn_stop()
     if not require_local_api() then return end
 
-    local output, code = node_m.stop_vpn()
-    if code == 0 then
+    local ok, code, detail = vpn_lifecycle("stop")
+    if ok then
         json_ok({ success = true, message = "VPN stopped" })
     else
-        local detail = util.trim(output or "")
         json_ok({ success = false, message = "Stop failed (code=" .. tostring(code) .. ")", detail = detail, code = code })
     end
 end
@@ -1332,13 +1356,11 @@ end
 function api_vpn_restart()
     if not require_local_api() then return end
 
-    local output, code = node_m.restart_vpn()
-    if code == 0 then
+    local ok, code, detail = vpn_lifecycle("restart")
+    if ok then
         json_ok({ success = true, message = "VPN restarted" })
     else
-        local detail = util.trim(output or "")
-        local hint = _svc_error_hint(detail, "restart")
-        json_ok({ success = false, message = hint, detail = detail, code = code })
+        json_ok({ success = false, message = _svc_error_hint(detail, "restart"), detail = detail, code = code })
     end
 end
 

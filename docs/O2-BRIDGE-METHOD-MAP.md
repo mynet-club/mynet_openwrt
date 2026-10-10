@@ -71,7 +71,10 @@
   - 模块：`lua -e require(...).status()` → `daemon=mynetd, success=true`（**Lua 5.1.5** 实机通过）；
   - 端点：`GET /cgi-bin/luci/admin/services/mynet/api/status` → 旧字段（`vpn_status`/`vpn_iface`/`zone`/`node_id`）**不变**，新增 `"bridge":{"daemon":"mynetd","listen":"127.0.0.1:8096","role":"transport-only"}`。
 - 设备原 controller 与仓内 HEAD **逐字节一致**（无本地分叉），覆盖安全。
-- **O5 剩余**：把 `index/node/service/proxy/guest` 等页面的读/写逐页改走 `bridge`（需浏览器验证 + 依 O0 操作全量表定取舍），并据此退役 Lua 的 `rc.mynet`/`route.mynet` 直连（O1-③ 解锁）。
+- **页面迁移（D1/D2/D3）**：`api_vpn_start/stop/restart` 改走 `bridge.service(action)`（经 `ubus mynet.service` → mynetd → 执行器 → `/etc/init.d/mynet`，**同步**返回真实成败，见 `handlers.go:dispatch`）。桥/daemon 不可用时**回落**旧直调（两者最终同走 procd init，行为等价）。设备实测（`.182`）：
+  - 走桥：`GET /api/vpn_restart` → `{"success":true,"message":"VPN restarted"}`，隧道接口序号 45→46 证明确实重启；
+  - 回落：临时移除 `bridge.lua` 后同端点仍成功（旧路径）。
+- **O5 剩余**：`index/node/service/proxy/guest` 其余读/写页逐页改走桥（O0 操作表已定各操作保留/迁移/移除），完成后退役 Lua `rc.mynet`/`route.mynet` 直连（解锁 O1-③）。
 
 ### 实测暴露的系统性问题（归 O3，已两次实证）
 
