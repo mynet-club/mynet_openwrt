@@ -61,7 +61,17 @@
   - 正向：`session login` 取得 SID 后，`ubus call session access '{"ubus_rpc_session":"<sid>","scope":"ubus","object":"mynet","function":"<m>"}'` 对 **16 个方法全部返回 `access=true`**；
   - 负向：同一 SID 对**不在 ACL 的方法**（`drop-everything`、`shell`）返回 `access=false` —— 边界收得住；
   - ⚠️ 注意：`ubus` CLI 以 uid 0 直连会**绕过** ACL，不能用 `ubus call mynet …` 验权限，必须走 `session access` 判定。
-- ✅ **静态一致性门禁**：`scripts/tools/check_bridge_acl.sh`（桥 16 方法 ⇄ ACL 读 10/写 6 逐项对齐）已挂进 `Makefile.guard` 的 `test` 目标；本机（BSD sed）与 Linux（GNU sed）双通，负例注入可红。
+- ✅ **静态一致性门禁**：`scripts/tools/check_bridge_acl.sh`（桥 16 方法 ⇄ ACL 读 10/写 6 ⇄ LuCI 客户端 `bridge.lua` 的 `M.METHODS`）**三方**逐项对齐，已挂进 `Makefile.guard` 的 `test` 目标；本机（BSD sed）与 Linux（GNU sed）双通，负例注入（缺项/等量替换）可红。
+- ✅ **HTTP 路径实证（LuCI JS 的真实调用形态）**：`POST /ubus`（rpcd HTTP）带会话 SID 调 `["<sid>","mynet","status",{}]` → `result:[0,{...localapi 信封透传...}]`；越权方法 → `error:{code:-32002,"Access denied"}`。这坐实了「浏览器只访问 LuCI 同源接口 → rpcd ACL → 回环 localapi」整条链。
+
+## 5b. O5 客户端接线（2026-10-11）
+
+- 新增 **`luasrc/model/mynet/bridge.lua`**：页面**唯一**的本地读写入口（`M.call` + 逐方法包装），方法表冻结为与桥/ACL 同一份 16 项，未知方法在客户端先于 ubus 拒绝。
+- **首个消费点**：`controller/mynet.lua:api_get_status` 附加 `bridge` 字段（独立 `pcall`，daemon 不在时不影响旧字段）。设备实测（`.182`）：
+  - 模块：`lua -e require(...).status()` → `daemon=mynetd, success=true`（**Lua 5.1.5** 实机通过）；
+  - 端点：`GET /cgi-bin/luci/admin/services/mynet/api/status` → 旧字段（`vpn_status`/`vpn_iface`/`zone`/`node_id`）**不变**，新增 `"bridge":{"daemon":"mynetd","listen":"127.0.0.1:8096","role":"transport-only"}`。
+- 设备原 controller 与仓内 HEAD **逐字节一致**（无本地分叉），覆盖安全。
+- **O5 剩余**：把 `index/node/service/proxy/guest` 等页面的读/写逐页改走 `bridge`（需浏览器验证 + 依 O0 操作全量表定取舍），并据此退役 Lua 的 `rc.mynet`/`route.mynet` 直连（O1-③ 解锁）。
 
 ### 实测暴露的系统性问题（归 O3，已两次实证）
 

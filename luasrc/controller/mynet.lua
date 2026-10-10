@@ -1225,12 +1225,24 @@ function api_get_status()
         vpn_status = node_m.get_vpn_service_status()
     end
 
+    -- O5：概览页额外从**桥**取一份「实际」daemon/transport 状态
+    -- （LuCI → ubus mynet.status → 本机 mynetd localapi）。
+    -- 附加字段，独立 pcall：桥/ daemon 不在时不影响上面旧字段。
+    local bridge
+    local ok, res = pcall(function()
+        return require("luci.model.mynet.bridge").status()
+    end)
+    if ok and type(res) == "table" and res.data then
+        bridge = res.data
+    end
+
     json_ok({
         success    = true,
         vpn_status = vpn_status,
         vpn_iface  = node_m.get_vpn_interface_status(),
         zone       = cfg_m.load_current_zone(),
         node_id    = node_id,
+        bridge     = bridge,
     })
 end
 
