@@ -2,10 +2,40 @@
 	"luci-app-mynet": {
 		"description": "Grant access for luci-app-mynet",
 		"read": {
-			"uci": [ "luci", "network", "system" ]
+			"uci": [
+				"luci",
+				"network",
+				"system"
+			],
+			"ubus": {
+				"mynet": [
+					"status",
+					"node-status",
+					"nodes",
+					"identity",
+					"runtime",
+					"tenants",
+					"wizard-state",
+					"metrics",
+					"logs",
+					"proxy-status"
+				]
+			}
 		},
 		"write": {
-			"uci": [ "luci" ]
+			"uci": [
+				"luci"
+			],
+			"ubus": {
+				"mynet": [
+					"connect",
+					"sync",
+					"keys-sync",
+					"switch-node",
+					"proxy-set",
+					"service"
+				]
+			}
 		}
 	}
 }

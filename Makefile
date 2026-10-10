@@ -53,6 +53,10 @@ define Package/luci-app-mynet/install
 
 	# init 不再随包（由 mynet install 从 agent 内嵌模板写出，见 O1）
 
+	# --- rpcd ucode 桥（O2）→ /usr/share/rpcd/ucode/（rpcd 实际加载目录，本机实测） ---
+	$(INSTALL_DIR) $(1)/usr/share/rpcd/ucode
+	$(INSTALL_DATA) ./luasrc/usr/lib/rpcd/ucode/mynet.uc $(1)/usr/share/rpcd/ucode/mynet.uc
+
 	# --- Runtime scripts: proxy ---
 	$(INSTALL_DIR) $(1)/etc/mynet/scripts/proxy/hooks
 	$(INSTALL_BIN) ./scripts/proxy/proxy.sh $(1)/etc/mynet/scripts/proxy/
