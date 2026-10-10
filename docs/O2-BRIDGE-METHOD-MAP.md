@@ -53,9 +53,15 @@
 - 读方法实测返回真实数据（`runtime` 给出 `interface=gnb_tun_16`、`node_id=8283289760467957`）。
 - 未知名方法由 rpcd 明确 `Method not found`。
 - ACL 文件被 rpcd 接受（重启无报错）；内容 = 读 10 / 写 6。
-- ⚠️ **入参类型**在 rpcd 侧显示为 `String`（`lines/active/auto/enabled`）—— 类型名需按 rpcd 支持的取值重写（待核），当前靠 `.uc` 内自行校验（如 `lines` 走 `^[0-9]{1,4}$`）。
-- ⚠️ **会话态 ACL 验证未做**：`ubus call session login` 需 root 口令（本次未提供）。验证命令（需口令）：
-  `SID=$(ubus call session login '{"username":"root","password":"<pw>"}' | jsonfilter -e '@.ubus_rpc_session'); ubus -S "$SID" call mynet status`
+- ✅ **入参类型 `String` 是 rpcd ucode 的标准渲染，不是缺陷**（无需重写）：
+  - rpcd 的 ucode 插件里 `args: { <名>: <值> }` 的**值就是参数名本身**（非 libubus 类型关键字），rpcd 一律渲染成 `String`；
+  - 设备自带插件的实证同此：`ddns.uc` 写 `args: { service_name: 'service_name' }`、`luci.wireguard` 写 `{ privkey: "String" }` —— 两者在 `ubus -v list` 上同为 `String`；
+  - 参数语义（是否必填、取值范围）由 `.uc` 内自行校验（如 `lines` 走 `^[0-9]{1,4}$`、`action` 走白名单）。
+- ✅ **会话态 ACL 正/负测试已做**（root 口令由用户提供，`.182` 实测）：
+  - 正向：`session login` 取得 SID 后，`ubus call session access '{"ubus_rpc_session":"<sid>","scope":"ubus","object":"mynet","function":"<m>"}'` 对 **16 个方法全部返回 `access=true`**；
+  - 负向：同一 SID 对**不在 ACL 的方法**（`drop-everything`、`shell`）返回 `access=false` —— 边界收得住；
+  - ⚠️ 注意：`ubus` CLI 以 uid 0 直连会**绕过** ACL，不能用 `ubus call mynet …` 验权限，必须走 `session access` 判定。
+- ✅ **静态一致性门禁**：`scripts/tools/check_bridge_acl.sh`（桥 16 方法 ⇄ ACL 读 10/写 6 逐项对齐）已挂进 `Makefile.guard` 的 `test` 目标；本机（BSD sed）与 Linux（GNU sed）双通，负例注入可红。
 
 ### 实测暴露的系统性问题（归 O3，已两次实证）
 

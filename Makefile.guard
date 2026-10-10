@@ -20,6 +20,7 @@ lint:
 test:
 	@echo "▸ test"
 	@sh scripts/tools/check_agent_pkg.sh
+	@sh scripts/tools/check_bridge_acl.sh
 
 guard:
 	@echo "▸ guard（安全红线）"
