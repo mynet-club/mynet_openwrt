@@ -925,8 +925,6 @@ local function read_nat_state()
     return nat_out, nat_in
 end
 
-
-
 function action_service()
     local c = auth_or_local()
 
@@ -1364,41 +1362,6 @@ function api_vpn_restart()
     end
 end
 
--- GNB 直接启停（node 页 Start/Stop/Restart 按鈕）
-function api_gnb_start()
-    if not require_local_api() then return end
-    local node_id = parse_node_id()
-    if not node_id then return end
-    local ok, err = node_m.start_gnb(node_id)
-    if ok then
-        json_ok({ success = true, message = "GNB started" })
-    else
-        local hint = _svc_error_hint(err or "", "start")
-        json_ok({ success = false, message = hint, detail = err })
-    end
-end
-
-function api_gnb_stop()
-    if not require_local_api() then return end
-    local node_id = parse_node_id()
-    if not node_id then return end
-    node_m.stop_gnb(node_id)
-    json_ok({ success = true, message = "GNB stopped" })
-end
-
-function api_gnb_restart()
-    if not require_local_api() then return end
-    local node_id = parse_node_id()
-    if not node_id then return end
-    local ok, err = node_m.restart_gnb(node_id)
-    if ok then
-        json_ok({ success = true, message = "GNB restarted" })
-    else
-        local hint = _svc_error_hint(err or "", "restart")
-        json_ok({ success = false, message = hint, detail = err })
-    end
-end
-
 function api_node_refresh_config()
     if not require_api_auth() then return end
 
@@ -1657,76 +1620,6 @@ function api_node_import_config()
 end
 
 -- ─────────────────────────────────────────────────────────────
--- 服务控制 API（Dashboard 快速按钮用）
--- ─────────────────────────────────────────────────────────────
-
-function api_svc_start()
-    if not require_local_api() then return end
-    local _, code = util.exec_status("/etc/init.d/mynet start 2>&1")
-    json_ok({ success = code == 0, message = code == 0 and "mynet started" or ("start failed (code=" .. tostring(code) .. ")") })
-end
-
-function api_svc_stop()
-    if not require_local_api() then return end
-    local _, code = util.exec_status("/etc/init.d/mynet stop 2>&1")
-    json_ok({ success = code == 0, message = code == 0 and "mynet stopped" or ("stop failed (code=" .. tostring(code) .. ")") })
-end
-
-function api_svc_restart()
-    if not require_local_api() then return end
-    local _, code = util.exec_status("/etc/init.d/mynet restart 2>&1")
-    json_ok({ success = code == 0, message = code == 0 and "mynet restarted" or ("restart failed (code=" .. tostring(code) .. ")") })
-end
-
-function api_mynetd_start()
-    if not require_local_api() then return end
-    local mon = cfg_m.load_monitor_config()
-    local bin = mon.mynetd_bin_path
-    if not util.file_exists(bin) then
-        json_ok({ success = false, message = "mynetd binary not found: " .. tostring(bin) })
-        return
-    end
-    local _, pid = get_mynetd_status()
-    if pid then
-        json_ok({ success = true, message = "mynetd already running (pid " .. pid .. ")" })
-        return
-    end
-    local cmd = bin .. " -c " .. util.CONF_DIR
-        .. " -interval " .. tostring(mon.heartbeat_interval)
-        .. " -log-level " .. (mon.log_level or "info")
-    if mon.daemon_mode then cmd = cmd .. " -d" end
-    util.exec(cmd .. " &")
-    json_ok({ success = true, message = "mynetd started" })
-end
-
-function api_mynetd_stop()
-    if not require_local_api() then return end
-    -- 多实例安全：优先 procd/init.d，回退精确 PID（不用 pkill -x）
-    util.exec_status("/etc/init.d/mynetd stop 2>/dev/null")
-    local _, pid = get_mynetd_status()
-    if pid then util.exec_status("kill " .. pid .. " 2>/dev/null") end
-    json_ok({ success = true, message = "mynetd stopped" })
-end
-
-function api_mynetd_restart()
-    if not require_local_api() then return end
-    -- 多实例安全：优先 procd/init.d，回退精确 PID
-    util.exec_status("/etc/init.d/mynetd stop 2>/dev/null")
-    local _, pid = get_mynetd_status()
-    if pid then util.exec_status("kill " .. pid .. " 2>/dev/null") end
-    local mon = cfg_m.load_monitor_config()
-    local bin = mon.mynetd_bin_path
-    if util.file_exists(bin) then
-        local cmd = bin .. " -c " .. util.CONF_DIR
-            .. " -interval " .. tostring(mon.heartbeat_interval)
-            .. " -log-level " .. (mon.log_level or "info")
-        if mon.daemon_mode then cmd = cmd .. " -d" end
-        util.exec(cmd .. " &")
-    end
-    json_ok({ success = true, message = "mynetd restarted" })
-end
-
--- ─────────────────────────────────────────────────────────────
 -- Pre-flight 校验 + 服务状态 API
 -- ─────────────────────────────────────────────────────────────
 
@@ -1742,23 +1635,6 @@ function api_svc_state()
     if not require_local_api() then return end
     local s = node_m.get_svc_state()
     json_ok({ success = true, data = s })
-end
-
--- ─────────────────────────────────────────────────────────────
--- Heartbeat API — 触发一次心跳上报
--- ─────────────────────────────────────────────────────────────
-
-function api_heartbeat()
-    if not require_api_auth() then return end
-    local node_id = parse_node_id(true) or cfg_m.get_node_id()
-    if not node_id then json_err("node_id required"); return end
-    local data, err = sys_m.submit_heartbeat(node_id)
-    if data then
-        json_ok({ success = true, message = "heartbeat sent",
-                  commands = data.commands, node_status = data.node_status })
-    else
-        json_ok({ success = false, message = err or "heartbeat failed" })
-    end
 end
 
 -- ─────────────────────────────────────────────────────────────
@@ -2433,63 +2309,6 @@ function api_guest_use()
     guest_m.ensure_route_conf(node_id)
 
     json_ok({ success = true, message = "已切换到节点 " .. util.int_str(node_id) })
-end
-
-function api_guest_start()
-    if not check_rate_limit(10, "guest") then
-        json_err("rate limit", 429); return
-    end
-    local guest_m = require("luci.model.mynet.guest")
-    local g = guest_m.load_config()
-    if not g or not g.local_node_id then
-        json_err("guest mode not initialized"); return
-    end
-
-    local gnb_bin = cfg_m.get_gnb_bin()
-    if not util.file_exists(gnb_bin) then
-        json_err("gnb 未安装，请先安装 GNB"); return
-    end
-
-    local conf_dir = util.GNB_CONF_DIR .. "/" .. util.int_str(g.local_node_id)
-    if not util.file_exists(conf_dir .. "/node.conf") then
-        json_err("节点配置不存在"); return
-    end
-
-    -- 确保 route.conf 与 guest.json 一致（始终重新生成）
-    local rok, rerr = guest_m.ensure_route_conf(g.local_node_id)
-    if not rok then
-        json_err("route.conf 生成失败: " .. (rerr or "unknown")); return
-    end
-
-    -- 生成 /etc/mynet/conf/route.conf（从 GNB route.conf 派生 CIDR 路由）
-    node_m.generate_route_conf(g.local_node_id)
-
-    -- 停止已有进程 → 启动 GNB（用 shell 后台 &，不用 -d 避免 daemon fork 问题）
-    local log_file = conf_dir .. "/gnb.log"
-    -- 多实例安全：只停本 conf 的 gnb（cmdline 匹配），不 killall
-    local cmd = string.format(
-        "for p in $(pgrep -f 'gnb -c %s' 2>/dev/null); do kill $p 2>/dev/null; done; sleep 1; '%s' -c '%s' >>'%s' 2>&1 &",
-        conf_dir, gnb_bin, conf_dir, log_file)
-    os.execute(cmd)
-
-    -- 短暂等待确认进程存活
-    util.exec("sleep 1")
-    local ps = util.trim(util.exec("pgrep gnb 2>/dev/null") or "")
-    if ps == "" then
-        json_err("GNB 启动失败，请查看日志: " .. log_file); return
-    end
-
-    json_ok({ success = true, message = "GNB 已启动" })
-end
-
--- 停止 Guest GNB
-function api_guest_stop()
-    if not check_rate_limit(10, "guest") then
-        json_err("rate limit", 429); return
-    end
-    -- 多实例安全：只停 guest 实例（cmdline 匹配 conf），不 killall
-    os.execute("for p in $(pgrep -f 'gnb -c /etc/mynet' 2>/dev/null); do kill $p 2>/dev/null; done")
-    json_ok({ success = true, message = "GNB 已停止" })
 end
 
 -- 重置 Guest 网络

@@ -308,54 +308,6 @@
 		}
 	},
 
-	"admin/services/mynet/api/svc_start": {
-		"action": {
-			"type": "call",
-			"module": "luci.controller.mynet",
-			"function": "api_svc_start"
-		}
-	},
-
-	"admin/services/mynet/api/svc_stop": {
-		"action": {
-			"type": "call",
-			"module": "luci.controller.mynet",
-			"function": "api_svc_stop"
-		}
-	},
-
-	"admin/services/mynet/api/svc_restart": {
-		"action": {
-			"type": "call",
-			"module": "luci.controller.mynet",
-			"function": "api_svc_restart"
-		}
-	},
-
-	"admin/services/mynet/api/mynetd_start": {
-		"action": {
-			"type": "call",
-			"module": "luci.controller.mynet",
-			"function": "api_mynetd_start"
-		}
-	},
-
-	"admin/services/mynet/api/mynetd_stop": {
-		"action": {
-			"type": "call",
-			"module": "luci.controller.mynet",
-			"function": "api_mynetd_stop"
-		}
-	},
-
-	"admin/services/mynet/api/mynetd_restart": {
-		"action": {
-			"type": "call",
-			"module": "luci.controller.mynet",
-			"function": "api_mynetd_restart"
-		}
-	},
-
 	"admin/services/mynet/api/gnb_nodes": {
 		"action": {
 			"type": "call",
@@ -380,30 +332,6 @@
 		}
 	},
 
-	"admin/services/mynet/api/gnb_start": {
-		"action": {
-			"type": "call",
-			"module": "luci.controller.mynet",
-			"function": "api_gnb_start"
-		}
-	},
-
-	"admin/services/mynet/api/gnb_stop": {
-		"action": {
-			"type": "call",
-			"module": "luci.controller.mynet",
-			"function": "api_gnb_stop"
-		}
-	},
-
-	"admin/services/mynet/api/gnb_restart": {
-		"action": {
-			"type": "call",
-			"module": "luci.controller.mynet",
-			"function": "api_gnb_restart"
-		}
-	},
-
 	"admin/services/mynet/api/preflight": {
 		"action": {
 			"type": "call",
@@ -417,14 +345,6 @@
 			"type": "call",
 			"module": "luci.controller.mynet",
 			"function": "api_svc_state"
-		}
-	},
-
-	"admin/services/mynet/api/heartbeat": {
-		"action": {
-			"type": "call",
-			"module": "luci.controller.mynet",
-			"function": "api_heartbeat"
 		}
 	},
 
@@ -633,22 +553,6 @@
 			"type": "call",
 			"module": "luci.controller.mynet",
 			"function": "api_guest_use"
-		}
-	},
-
-	"admin/services/mynet/api/guest_start": {
-		"action": {
-			"type": "call",
-			"module": "luci.controller.mynet",
-			"function": "api_guest_start"
-		}
-	},
-
-	"admin/services/mynet/api/guest_stop": {
-		"action": {
-			"type": "call",
-			"module": "luci.controller.mynet",
-			"function": "api_guest_stop"
 		}
 	},
 
