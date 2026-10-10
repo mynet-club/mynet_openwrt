@@ -213,8 +213,12 @@ function M.exec_status(cmd)
     if not h then return nil, -1 end
     local raw = h:read("*a")
     h:close()
-    local code_str = raw:match(marker .. ":(%d+)%s*$")
-    local output   = raw:gsub("\n?" .. marker .. ":%d+%s*$", "")
+    -- 取**最后一次** marker：init 会在 start 后**后台**继续输出（tun 就绪后补路由/防火墙/
+    -- post_start），那批输出可能排在 marker 之后。若假定 marker 在末尾（%s*$），
+    -- 就会解析失败返回 -1 → 调用方把**成功**当成失败（实测「service restart 成功却 exit 1」）。
+    local code_str
+    for m in raw:gmatch(marker .. ":(%d+)") do code_str = m end
+    local output = raw:gsub(marker .. ":%d+\n?", "")
     return output, tonumber(code_str) or -1
 end
 
