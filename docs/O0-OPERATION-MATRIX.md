@@ -371,6 +371,7 @@ LuCI 只是壳，不应直接做系统写入；浏览器只访问 LuCI 同源接
 | O3 | `util.lua:M.exec_status` 取**最后一次** marker，修「成功却回 exit 1」 |
 | O5 客户端 | 新增 `luasrc/model/mynet/bridge.lua`（页面唯一本地读写入口，方法表冻结 16 项） |
 | **已迁移** | `api_get_status` 附 `bridge` 字段；**D1/D2/D3** `api_vpn_{start,stop,restart}` 走 `bridge.service`（保契约 + 桥缺失回落） |
+| **浏览器实测** | 登录 `.182` LuCI：Dashboard 渲染（Running / gnb_tun_16 UP / Start-Stop-Restart 齐）；点 **Restart** → 页面 toast **「VPN restarted」**（走桥路径）；页面内 `fetch(api/status)` → 200 且 `bridge.daemon=mynetd`；Node 页「Node Manager →」链接 = `node?tab=list`；两页**无控制台报错** |
 | **已移除** | **D4–D6** `api/gnb_*`、**D7–D9** `api/svc_*`、**D10–D12** `api/mynetd_*`、**F13** `api/heartbeat`、**H8/H9** `api/guest_{start,stop}`（12 个，均无活动调用者、均直写系统）；**C8** `node/manager`+`nodes` 重定向壳（含 node.htm 链接、menu.d、node_manager.htm） |
 | **未迁移（耦合，勿机械替换）** | 写侧 `api_node_switch`/`api_node_config`/`api_proxy_enable` 等改走桥会**改变行为**（Lua 现写 conf/驱动引擎），须与 O4 的 proxy/云同步切换配套；读侧 `api_logs_tail`（luci.log）与桥 `/logs`（mynetd）**数据源不同**。均需浏览器验证 + 引擎切换，不在本轮 |
 | **未迁移（O1-③ 依赖 O5）** | `rc.mynet`/`route.mynet` 直连的 Lua 启停/拆脚本，待上述页面改走桥后退役 |
