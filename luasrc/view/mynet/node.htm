@@ -507,7 +507,7 @@ local has_node = (cur_nid_str ~= "0" and cur_nid_str ~= "")
 <!-- ═══════════════════════ 底部操作栏 ═══════════════════════ -->
 <div class="cbi-page-actions">
     <a class="cbi-button" href="<%=luci.dispatcher.build_url('admin/services/mynet/index')%>">&#8592; <%:Dashboard%></a>
-    <a class="cbi-button" href="<%=luci.dispatcher.build_url('admin/services/mynet/node/manager')%>"><%:Node Manager%> &#8594;</a>
+    <a class="cbi-button" href="<%=luci.dispatcher.build_url('admin/services/mynet/node')%>?tab=list"><%:Node Manager%> &#8594;</a>
     <span id="mn-node-global-status" class="mn-muted mn-small"></span>
 </div>
 

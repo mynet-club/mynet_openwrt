@@ -64,17 +64,6 @@ function index()
         nil
     ).dependent = false
 
-    entry({"admin", "services", "mynet", "node", "manager"},
-        call("action_node_manager"),
-        nil
-    ).dependent = false
-
-    -- 兼容旧链接
-    entry({"admin", "services", "mynet", "nodes"},
-        call("action_nodes"),
-        nil
-    ).dependent = false
-
     -- 状态（从菜单移除，保留路由兼容）
     entry({"admin", "services", "mynet", "status"},
         call("action_status"),
@@ -612,7 +601,7 @@ function action_zones_select()
             return
         end
     end
-    http.redirect(disp.build_url("admin/services/mynet/nodes"))
+    http.redirect(disp.build_url("admin/services/mynet/node") .. "?tab=list")
 end
 
 -- 节点配置页（主菜单 Node）
@@ -685,16 +674,6 @@ function action_node()
         node_tab     = node_tab,
         local_peers  = local_peers,
     })
-end
-
--- 节点管理页（已合并到 node 页 tab=list，保留向后兼容）
-function action_node_manager()
-    http.redirect(disp.build_url("admin/services/mynet/node") .. "?tab=list")
-end
-
--- 兼容旧链接
-function action_nodes()
-    http.redirect(disp.build_url("admin/services/mynet/node") .. "?tab=list")
 end
 
 -- 状态页（已移除，重定向到 Dashboard）

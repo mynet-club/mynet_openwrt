@@ -70,22 +70,6 @@
 		}
 	},
 
-	"admin/services/mynet/node/manager": {
-		"action": {
-			"type": "call",
-			"module": "luci.controller.mynet",
-			"function": "action_node_manager"
-		}
-	},
-
-	"admin/services/mynet/nodes": {
-		"action": {
-			"type": "call",
-			"module": "luci.controller.mynet",
-			"function": "action_nodes"
-		}
-	},
-
 	"admin/services/mynet/status": {
 		"action": {
 			"type": "call",

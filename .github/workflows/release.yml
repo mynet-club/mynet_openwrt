@@ -53,7 +53,7 @@ jobs:
           # LuCI views (only active templates)
           mkdir -p "${DATA_ROOT}/usr/lib/lua/luci/view/mynet"
           for f in index wizard login guest node service plugin proxy settings \
-                   status node_manager log diagnose _i18n_js; do
+                   status log diagnose _i18n_js; do
             if [ -f "luasrc/view/mynet/${f}.htm" ]; then
               install -m644 "luasrc/view/mynet/${f}.htm" \
                 "${DATA_ROOT}/usr/lib/lua/luci/view/mynet/"
