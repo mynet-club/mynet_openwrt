@@ -360,7 +360,24 @@ LuCI 只是壳，不应直接做系统写入；浏览器只访问 LuCI 同源接
 
 ---
 
-## 6. 复核方法（可重跑）
+## 7. 执行进度（2026-10-11 · O2/O3/O5）
+
+> 矩阵是**目标态裁定**；本节记**已执行**了什么，避免把「已落地」当「待办」重做。
+> 每项均设备实证（`.182` ImmortalWrt 24.10 x86_64）。
+
+| 范围 | 落到哪一步 |
+|---|---|
+| O2 桥 | rpcd ucode 桥 + ACL（读 10/写 6）已上设备；`session access` 正负判定通过；HTTP `/ubus` 路径实证；三方一致性门禁 `scripts/tools/check_bridge_acl.sh`（桥⇄ACL⇄`bridge.lua`）挂 `make test` |
+| O3 | `util.lua:M.exec_status` 取**最后一次** marker，修「成功却回 exit 1」 |
+| O5 客户端 | 新增 `luasrc/model/mynet/bridge.lua`（页面唯一本地读写入口，方法表冻结 16 项） |
+| **已迁移** | `api_get_status` 附 `bridge` 字段；**D1/D2/D3** `api_vpn_{start,stop,restart}` 走 `bridge.service`（保契约 + 桥缺失回落） |
+| **已移除** | **D4–D6** `api/gnb_*`、**D7–D9** `api/svc_*`、**D10–D12** `api/mynetd_*`、**F13** `api/heartbeat`、**H8/H9** `api/guest_{start,stop}`（12 个，均无活动调用者、均直写系统）；**C8** `node/manager`+`nodes` 重定向壳（含 node.htm 链接、menu.d、node_manager.htm） |
+| **未迁移（耦合，勿机械替换）** | 写侧 `api_node_switch`/`api_node_config`/`api_proxy_enable` 等改走桥会**改变行为**（Lua 现写 conf/驱动引擎），须与 O4 的 proxy/云同步切换配套；读侧 `api_logs_tail`（luci.log）与桥 `/logs`（mynetd）**数据源不同**。均需浏览器验证 + 引擎切换，不在本轮 |
+| **未迁移（O1-③ 依赖 O5）** | `rc.mynet`/`route.mynet` 直连的 Lua 启停/拆脚本，待上述页面改走桥后退役 |
+
+---
+
+## 8. 复核方法（可重跑）
 
 ```bash
 # 路由全集
