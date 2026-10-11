@@ -2,7 +2,11 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-mynet
 PKG_VERSION:=2.1.8
-PKG_RELEASE:=1
+# opkg 判「是不是升级」用的是 version-release。PKG_RELEASE 固定成 1 时，同一
+# 产品版本下的任何重建在 opkg 眼里都是「已是最新」—— 升级必须 --force-reinstall，
+# 否则静默不动。CI 传入本次构建的**单调**序号（git 提交计数：同提交可复现、
+# 跨提交递增）覆盖它；没传（本地手编）时退回 1。
+PKG_RELEASE:=$(if $(MYNET_PKG_RELEASE),$(MYNET_PKG_RELEASE),1)
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)
 
@@ -21,6 +25,12 @@ define Package/luci-app-mynet/description
   MyNet VPN management interface for OpenWrt.
   Provides zone/node management, config sync, and VPN control
   through the LuCI web interface.
+endef
+
+# 运维配置必须声明为 conffiles：否则 opkg 把它当普通文件，升级时**无声覆盖**
+# 设备上的改动（此前正是如此）。声明后 opkg 保留设备侧内容并提示。
+define Package/luci-app-mynet/conffiles
+/etc/mynet/conf/config.json
 endef
 
 define Build/Compile
