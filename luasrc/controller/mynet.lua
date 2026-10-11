@@ -2160,6 +2160,24 @@ function api_proxy_config()
         if not ok then json_err(err); return end
 
         local enabled_s = http.formvalue("proxy_enabled")
+        -- O5：保存配置也走桥。enabled 未随表单给时用**当前生效值**（读桥），不猜。
+        local enabled
+        if enabled_s then
+            enabled = (enabled_s == "1" or enabled_s == "true")
+        else
+            enabled = _proxy_current_enabled()
+        end
+        if enabled ~= nil then
+            local bok, bmsg = _proxy_via_bridge(enabled)
+            if bok then
+                json_ok({ success = true, message = "config saved", method = bmsg })
+                return
+            elseif bok == false then
+                json_err(bmsg); return
+            end
+        end
+
+        -- 桥不可用 → 回落 Lua
         local fields = {}
         if params.mode      then fields.proxy_mode  = params.mode end
         if params.region    then fields.node_region  = params.region end
