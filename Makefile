@@ -156,6 +156,15 @@ unset _h _src _dst
 # Clear LuCI cache
 rm -rf /tmp/luci-*
 # firewall zone / env / init 归 `mynet install`（agent 包 postinst 调）
+
+# ⚠️ 包顺序竞态：agent 包的 postinst 会跑 `mynet install`（起 mynetd → 拉 bundle →
+# service.reload → init start_service → run_plugin_hooks post_start）。opkg 先配 agent
+# 后配本包时，那一刻 plugin/proxy/ 钩子还没落地 ⇒ 代理**静默没起**（症状：fwmark 规则
+# 与 mynet_proxy 路由表缺失，隧道本身正常）。2026-10-11 升 .182 实测踩过。
+# 钩子同步完之后补跑一次 post_start；隧道未就绪时它会自己失败退出（|| true），无副作用。
+if [ -x /etc/mynet/scripts/plugin/proxy/post_start.sh ]; then
+    MYNET_HOME=/etc/mynet sh /etc/mynet/scripts/plugin/proxy/post_start.sh >/dev/null 2>&1 || true
+fi
 exit 0
 endef
 
