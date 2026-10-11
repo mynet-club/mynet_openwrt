@@ -76,10 +76,24 @@ function M.logs(lines)    return M.call("logs", lines and { lines = tostring(lin
 
 -- ── 写（页面操作）───────────────────────────────────────────────
 -- fields 为 table；逐字段白名单由 .uc 侧限定（与 localapi handler 字段对齐）。
+-- ⚠️ rpcd 的 arg 恒为 String：布尔要传 "true"/"false"（.uc 的 boolBody 转回真布尔）。
+local function _str(v)
+    if type(v) == "boolean" then return v and "true" or "false" end
+    return v
+end
+
+-- 把 table 里的布尔值转成字符串（其余原样）
+local function _strs(t)
+    if type(t) ~= "table" then return t end
+    local o = {}
+    for k, v in pairs(t) do o[k] = _str(v) end
+    return o
+end
+
 function M.connect()            return M.call("connect") end
-function M.apply(start)         return M.call("apply", { start = start }) end
-function M.keys(fields)         return M.call("keys", fields) end
-function M.active(fields)       return M.call("active", fields) end
+function M.apply(start)         return M.call("apply", { start = _str(start) }) end
+function M.keys(fields)         return M.call("keys", _strs(fields)) end
+function M.active(fields)       return M.call("active", _strs(fields)) end
 function M.prepare()            return M.call("prepare") end
 function M.switch_node(node_id) return M.call("switch-node", { node_id = node_id }) end
 -- policy 经 .uc 的 jsonArg 传：这里编码成 JSON 字符串（rpcd arg 恒为 String）

@@ -39,9 +39,9 @@ const TABLE = {
 	logs:           { m: 'get',  p: '/api/v1/logs', lines: true },
 	// 写
 	connect:        { m: 'post', p: '/api/v1/config/connect' },
-	apply:          { m: 'post', p: '/api/v1/config/apply',  body: [ 'start' ] },
-	keys:           { m: 'post', p: '/api/v1/config/keys',   body: [ 'generate', 'private_hex', 'public_hex', 'node_id', 'vpn_type' ] },
-	active:         { m: 'post', p: '/api/v1/config/active', body: [ 'tenant', 'node', 'setup_only', 'vpn_type' ] },
+	apply:          { m: 'post', p: '/api/v1/config/apply',  body: [ 'start' ], boolBody: [ 'start' ] },
+	keys:           { m: 'post', p: '/api/v1/config/keys',   body: [ 'generate', 'private_hex', 'public_hex', 'node_id', 'vpn_type' ], boolBody: [ 'generate' ] },
+	active:         { m: 'post', p: '/api/v1/config/active', body: [ 'tenant', 'node', 'setup_only', 'vpn_type' ], boolBody: [ 'setup_only' ] },
 	prepare:        { m: 'post', p: '/api/v1/config/prepare' },
 	'switch-node':  { m: 'post', p: '/api/v1/nodes/switch',  body: [ 'node_id' ] },
 	// policy 是**嵌套对象**：rpcd 把所有 arg 当 String，直接传对象会 INVALID_ARGUMENT，
@@ -103,6 +103,14 @@ function call(name, req) {
 					v = d2;
 				}
 				data[fld] = v;
+			}
+			// boolBody：这些字段 rpcd 只能给字符串，这里转回**真布尔**（Go 侧是 bool，
+			// 收 "true"/"false" 字符串会 unmarshal 失败）。
+			const bools = e.boolBody ?? [];
+			for (let b2 = 0; b2 < length(bools); b2++) {
+				const bf = bools[b2];
+				if (data[bf] != null)
+					data[bf] = (data[bf] == 'true' || data[bf] == '1');
 			}
 		}
 

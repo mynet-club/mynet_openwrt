@@ -1349,7 +1349,20 @@ function api_node_refresh_config()
     local config_type = http.formvalue("type") or "all"
 
     if config_type == "all" then
-        -- 优先 bundle API，自动 fallback
+        -- O5：刷新全部配置走桥（keys ensure/sync + pull）；桥不可用回落 Lua。
+        local mod_ok, bridge = pcall(require, "luci.model.mynet.bridge")
+        if mod_ok and bridge then
+            local res = bridge.prepare()
+            if res then
+                if res.success then
+                    json_ok({ success = true, method = "bridge" })
+                else
+                    json_ok({ success = false, method = "bridge",
+                              errors = { res.detail or res.message or res.error or "refresh failed" } })
+                end
+                return
+            end
+        end
         local results = node_m.refresh_configs_bundle(node_id)
         json_ok({ success = results.ok, files = results.files, errors = results.errors,
                   warnings = results.warnings, method = results.method })
@@ -1388,11 +1401,40 @@ function api_node_save_key()
 end
 
 -- 切换节点 API（POST: node_id）
+
+-- O5：从桥的 identity 取当前 tenant（active/切换需要它；Go 的 mode.json 是权威）
+local function _bridge_tenant()
+    local mod_ok, bridge = pcall(require, "luci.model.mynet.bridge")
+    if not mod_ok or not bridge then return nil end
+    local res = bridge.identity()
+    if res and res.data and res.data.tenant_id and res.data.tenant_id ~= "" then
+        return res.data.tenant_id
+    end
+    return nil
+end
+
 function api_node_switch()
     if not require_api_auth() then return end
 
     local node_id = parse_node_id()
     if not node_id then return end
+
+    -- O5：切节点走桥（active setup_only 写该节点配置 + switch-node 切焦点）；
+    -- 桥不可用（或拿不到 tenant）才回落 Lua。
+    local tenant = _bridge_tenant()
+    local mod_ok, bridge = pcall(require, "luci.model.mynet.bridge")
+    if tenant and mod_ok and bridge then
+        local res = bridge.active({ tenant = tenant, node = util.int_str(node_id), setup_only = true })
+        if res and res.success then
+            bridge.switch_node(util.int_str(node_id))
+            json_ok({ success = true, message = "node switched to " .. util.int_str(node_id),
+                      redirect = disp.build_url("admin/services/mynet/node"), method = "bridge" })
+        else
+            json_ok({ success = false, method = "bridge",
+                      message = (res and (res.detail or res.message)) or "switch failed" })
+        end
+        return
+    end
 
     cfg_m.generate_mynet_conf(node_id)
     node_m.refresh_configs_bundle(node_id)
