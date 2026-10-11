@@ -516,6 +516,66 @@ configure_firewall_forwarding() {
     fi
 }
 
+# NAT 开关（页面 Operations 的 NAT 按钮落点）。
+#   firewall.mynet nat outbound <0|1>   —— zone masq 开关（出站 NAT）
+#   firewall.mynet nat inbound  <0|1>   —— mynet→lan 转发开关（入站 NAT）
+# UCI/fw4 的细节**留在本脚本**（LuCI 不再内联 uci set/commit）。
+nat_set() {
+    local ntype="$1" val="$2"
+    [ "$val" = "1" ] || val=0
+
+    local sec="" i=0
+    while uci get "firewall.@zone[$i]" >/dev/null 2>&1; do
+        if [ "$(uci get "firewall.@zone[$i].name" 2>/dev/null)" = "$VPN_ZONE_NAME" ]; then
+            sec="firewall.@zone[$i]"
+            break
+        fi
+        i=$((i + 1))
+    done
+    [ -n "$sec" ] || { log "ERROR: 未找到 $VPN_ZONE_NAME 防火墙区域"; return 1; }
+
+    if [ "$ntype" = "outbound" ]; then
+        uci set "$sec.masq=$val"
+        log "出站 NAT(masq) = $val"
+    elif [ "$ntype" = "inbound" ]; then
+        local j=0
+        while uci get "firewall.@forwarding[$j]" >/dev/null 2>&1; do
+            local src dest
+            src=$(uci get "firewall.@forwarding[$j].src" 2>/dev/null)
+            dest=$(uci get "firewall.@forwarding[$j].dest" 2>/dev/null)
+            if [ "$src" = "$VPN_ZONE_NAME" ] && [ "$dest" = "lan" ]; then
+                if [ "$val" = "0" ]; then
+                    uci delete "firewall.@forwarding[$j]"
+                    continue
+                fi
+                log "入站 NAT(mynet→lan) 已存在"
+                uci commit firewall
+                /etc/init.d/firewall reload >/dev/null 2>&1
+                return 0
+            fi
+            j=$((j + 1))
+        done
+        if [ "$val" = "1" ]; then
+            uci add firewall forwarding >/dev/null
+            uci set "firewall.@forwarding[-1].src=$VPN_ZONE_NAME"
+            uci set "firewall.@forwarding[-1].dest=lan"
+        fi
+        log "入站 NAT(mynet→lan) = $val"
+    else
+        log "ERROR: 未知 NAT 类型 '$ntype'（outbound|inbound）"
+        return 1
+    fi
+
+    uci commit firewall
+    /etc/init.d/firewall reload >/dev/null 2>&1
+}
+
+# 提交并重载 fw4（页面 reload_fw_commit）
+fw_commit() {
+    uci commit firewall
+    /etc/init.d/firewall reload
+}
+
 # Install firewall configuration (called during installation)
 # 安装阶段: 创建 zone, forwarding rules, include script
 # NOTE: network.mynet 接口必须由 service-manager.sh 在调用此函数前创建
@@ -896,9 +956,15 @@ case "$COMMAND" in
     status)
         show_status
         ;;
+    nat)
+        nat_set "$1" "$2"
+        ;;
+    commit)
+        fw_commit
+        ;;
     *)
         cat << 'EOF'
-Usage: $0 {install|uninstall|start|stop|restart|status} [OPTIONS]
+Usage: $0 {install|uninstall|start|stop|restart|status|nat|commit} [OPTIONS]
 
 COMMANDS:
   install   - Install MyNet firewall (zone, network, forwarding, include script)

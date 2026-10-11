@@ -47,6 +47,8 @@ const TABLE = {
 	// policy 是**嵌套对象**：rpcd 把所有 arg 当 String，直接传对象会 INVALID_ARGUMENT，
 	// 故经 `jsonArg` 收 JSON 字符串再解回对象（客户端负责 json 编码）。
 	'proxy-set':    { m: 'post', p: '/api/v1/plugin/proxy',  body: [ 'policy' ], jsonArg: 'policy' },
+	// route-apply：固定 argv 的 OS 路由/防火墙应用（跨平台，Go 的 apply --auto）
+	'route-apply':  { m: 'post', p: '/api/v1/command', fixedArgv: [ 'apply', '--auto' ] },
 	// service：action 以**执行器实现**为准（OpenWrt 上 mynetd 走 Lua，
 	// 白名单 = start|stop|reload|restart；**不含 status**，状态请用 status/runtime）
 	service:        { m: 'post', p: '/api/v1/command', argv: {
@@ -76,7 +78,11 @@ function call(name, req) {
 	if (e.m == 'post') {
 		let data;
 
-		if (e.argv) {
+		if (e.fixedArgv) {
+			// 固定 argv（不接收外部 argv）：整条动作写死，防任意命令
+			data = { argv: e.fixedArgv };
+		}
+		else if (e.argv) {
 			const act = args.action ?? 'status';
 			if (e.argv[act] == null)
 				return { success: false, error: 'bad-param', detail: 'action' };
@@ -151,6 +157,7 @@ const methods = {
 	'proxy-status':    { call: (req) => call('proxy-status', req) },
 	logs:              { args: { lines: 'lines' }, call: (req) => call('logs', req) },
 	connect:           { call: (req) => call('connect', req) },
+	'route-apply':     { call: (req) => call('route-apply', req) },
 	apply:             { args: { start: 'start' }, call: (req) => call('apply', req) },
 	keys:              { args: { generate: 'generate', private_hex: 'private_hex', public_hex: 'public_hex', node_id: 'node_id', vpn_type: 'vpn_type' }, call: (req) => call('keys', req) },
 	active:            { args: { tenant: 'tenant', node: 'node', setup_only: 'setup_only', vpn_type: 'vpn_type' }, call: (req) => call('active', req) },

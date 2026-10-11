@@ -35,7 +35,8 @@
 					"prepare",
 					"switch-node",
 					"proxy-set",
-					"service"
+					"service",
+					"route-apply"
 				]
 			}
 		}

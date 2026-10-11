@@ -20,7 +20,7 @@ M.METHODS = {
     "tenants", "wizard-state", "metrics", "proxy-status", "logs",
     -- 写（ACL write）
     "connect", "apply", "keys", "active", "prepare",
-    "switch-node", "proxy-set", "service",
+    "switch-node", "proxy-set", "service", "route-apply",
 }
 
 local METHOD_SET = {}
@@ -95,6 +95,8 @@ function M.apply(start)         return M.call("apply", { start = _str(start) }) 
 function M.keys(fields)         return M.call("keys", _strs(fields)) end
 function M.active(fields)       return M.call("active", _strs(fields)) end
 function M.prepare()            return M.call("prepare") end
+-- route-apply：应用 OS 路由/防火墙（固定 argv: apply --auto）
+function M.route_apply()        return M.call("route-apply") end
 function M.switch_node(node_id) return M.call("switch-node", { node_id = node_id }) end
 -- policy 经 .uc 的 jsonArg 传：这里编码成 JSON 字符串（rpcd arg 恒为 String）
 function M.proxy_set(policy)    return M.call("proxy-set", { policy = util.json_encode(policy) }) end

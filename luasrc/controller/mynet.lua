@@ -1038,24 +1038,36 @@ function action_service_op()
     -- 网络操作（从原 network_op 合并）
     elseif service == "network" then
         if op == "reload_route" then
-            local iface = cfg_m.get_vpn_interface()
-            if not util.file_exists(util.VPN_CONF) then
-                err_msg = "mynet.conf 不存在，请先配置节点"
-            elseif not util.file_exists(util.CONF_DIR .. "/route.conf") then
-                err_msg = "route.conf 不存在，请先同步节点配置"
-            elseif not util.file_exists(util.ROUTE_SCRIPT) then
-                err_msg = "route.mynet 脚本不存在"
-            else
-                -- 检查 VPN 接口是否存在（服务必须已启动）
-                local iface_check = util.trim(util.exec("ip link show " .. iface .. " 2>/dev/null") or "")
-                if iface_check == "" then
-                    err_msg = "VPN 接口 " .. iface .. " 未启动，请先启动服务"
+            -- O5：应用 OS 路由/防火墙走桥（Go `apply --auto`，跨平台，非 OpenWrt 专属）；
+            -- 桥不可用才回落 Lua 的 route.mynet。
+            local b_res
+            local mod_ok, bridge = pcall(require, "luci.model.mynet.bridge")
+            if mod_ok and bridge then b_res = bridge.route_apply() end
+            if b_res then
+                if b_res.success then
+                    ok_msg = "route apply: ok (bridge)"
                 else
-                    local env = "MYNET_HOME=" .. util.MYNET_HOME
-                    local cmd = env .. " sh " .. util.ROUTE_SCRIPT .. " start --interface " .. iface .. " 2>&1"
-                    local out, code = util.exec_status(cmd)
-                    ok_msg = "route apply: " .. (util.trim(out or "") ~= "" and util.trim(out) or "ok")
-                    if code ~= 0 then err_msg = ok_msg; ok_msg = nil end
+                    err_msg = (b_res.detail or b_res.message or b_res.error or "route apply failed")
+                end
+            else
+                local iface = cfg_m.get_vpn_interface()
+                if not util.file_exists(util.VPN_CONF) then
+                    err_msg = "mynet.conf 不存在，请先配置节点"
+                elseif not util.file_exists(util.CONF_DIR .. "/route.conf") then
+                    err_msg = "route.conf 不存在，请先同步节点配置"
+                elseif not util.file_exists(util.ROUTE_SCRIPT) then
+                    err_msg = "route.mynet 脚本不存在"
+                else
+                    local iface_check = util.trim(util.exec("ip link show " .. iface .. " 2>/dev/null") or "")
+                    if iface_check == "" then
+                        err_msg = "VPN 接口 " .. iface .. " 未启动，请先启动服务"
+                    else
+                        local env = "MYNET_HOME=" .. util.MYNET_HOME
+                        local cmd = env .. " sh " .. util.ROUTE_SCRIPT .. " start --interface " .. iface .. " 2>&1"
+                        local out, code = util.exec_status(cmd)
+                        ok_msg = "route apply: " .. (util.trim(out or "") ~= "" and util.trim(out) or "ok")
+                        if code ~= 0 then err_msg = ok_msg; ok_msg = nil end
+                    end
                 end
             end
         elseif op == "reload_fw" then
@@ -1072,7 +1084,8 @@ function action_service_op()
                 if code ~= 0 then err_msg = ok_msg; ok_msg = nil end
             end
         elseif op == "reload_fw_commit" then
-            local out, code = util.exec_status("uci commit firewall && /etc/init.d/firewall reload 2>&1")
+            -- O5：UCI/fw4 细节收进平台脚本 firewall.mynet（LuCI 不再内联 uci/nft）
+            local out, code = util.exec_status("MYNET_HOME=" .. util.MYNET_HOME .. " sh " .. util.FIREWALL_SCRIPT .. " commit 2>&1")
             ok_msg = "fw reload: " .. (util.trim(out or "") ~= "" and util.trim(out) or "ok")
             if code ~= 0 then err_msg = ok_msg; ok_msg = nil end
         elseif op == "initd_enable" then
@@ -1082,42 +1095,19 @@ function action_service_op()
             util.exec_status("/etc/init.d/mynet disable 2>&1")
             ok_msg = "autostart disabled"
         elseif op == "set_nat" then
+            -- O5：UCI/fw4 细节收进平台脚本 firewall.mynet；LuCI 只调它（不再内联 uci/nft）。
+            -- nat_type 必须白名单（会拼进 shell）。
             local nat_type = http.formvalue("nat_type") or ""
             local val = (http.formvalue("value") == "1") and "1" or "0"
-
-            if nat_type == "outbound" then
-                local fw_dump = util.exec("uci show firewall 2>/dev/null") or ""
-                local zone_sec = fw_dump:match("(firewall%.@zone%[%d+%])%.name='mynet'")
-                if zone_sec then
-                    util.exec("uci set " .. zone_sec .. ".masq=" .. val .. " 2>/dev/null")
-                    util.exec("uci commit firewall && /etc/init.d/firewall reload 2>/dev/null")
-                    ok_msg = "出站NAT " .. (val == "1" and "已启用" or "已禁用")
-                else
-                    err_msg = "未找到 mynet 防火墙区域"
-                end
-            elseif nat_type == "inbound" then
-                if val == "1" then
-                    -- 添加 mynet→lan 转发（如不存在）
-                    local _, cur_in = read_nat_state()
-                    if not cur_in then
-                        util.exec("uci add firewall forwarding 2>/dev/null")
-                        util.exec("uci set firewall.@forwarding[-1].src='mynet' 2>/dev/null")
-                        util.exec("uci set firewall.@forwarding[-1].dest='lan' 2>/dev/null")
-                    end
-                else
-                    -- 删除 mynet→lan 转发
-                    for i = 20, 0, -1 do
-                        local src  = util.trim(util.exec("uci -q get firewall.@forwarding[" .. i .. "].src 2>/dev/null") or "")
-                        local dest = util.trim(util.exec("uci -q get firewall.@forwarding[" .. i .. "].dest 2>/dev/null") or "")
-                        if src == "mynet" and dest == "lan" then
-                            util.exec("uci delete firewall.@forwarding[" .. i .. "] 2>/dev/null")
-                        end
-                    end
-                end
-                util.exec("uci commit firewall && /etc/init.d/firewall reload 2>/dev/null")
-                ok_msg = "入站NAT " .. (val == "1" and "已启用" or "已禁用")
-            else
+            if nat_type ~= "outbound" and nat_type ~= "inbound" then
                 err_msg = "未知的 NAT 类型"
+            else
+                local out, code = util.exec_status("MYNET_HOME=" .. util.MYNET_HOME .. " sh " .. util.FIREWALL_SCRIPT .. " nat " .. nat_type .. " " .. val .. " 2>&1")
+                ok_msg = (nat_type == "outbound" and "出站NAT " or "入站NAT ") .. (val == "1" and "已启用" or "已禁用")
+                if code ~= 0 then
+                    err_msg = ok_msg .. (util.trim(out or "") ~= "" and ("：" .. util.trim(out)) or "")
+                    ok_msg = nil
+                end
             end
         elseif op == "fw_setup" then
             local fw_ok, fw_msg = sys_m.ensure_firewall_zone()
