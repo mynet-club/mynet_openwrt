@@ -81,7 +81,8 @@ function M.keys(fields)         return M.call("keys", fields) end
 function M.active(fields)       return M.call("active", fields) end
 function M.prepare()            return M.call("prepare") end
 function M.switch_node(node_id) return M.call("switch-node", { node_id = node_id }) end
-function M.proxy_set(policy)    return M.call("proxy-set", { policy = policy }) end
+-- policy 经 .uc 的 jsonArg 传：这里编码成 JSON 字符串（rpcd arg 恒为 String）
+function M.proxy_set(policy)    return M.call("proxy-set", { policy = util.json_encode(policy) }) end
 
 -- service(op) op ∈ {start,stop,reload,restart}（执行器白名单，见 O2 映射表）
 function M.service(op)          return M.call("service", { action = op }) end

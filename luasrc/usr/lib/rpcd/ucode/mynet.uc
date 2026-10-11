@@ -44,7 +44,9 @@ const TABLE = {
 	active:         { m: 'post', p: '/api/v1/config/active', body: [ 'tenant', 'node', 'setup_only', 'vpn_type' ] },
 	prepare:        { m: 'post', p: '/api/v1/config/prepare' },
 	'switch-node':  { m: 'post', p: '/api/v1/nodes/switch',  body: [ 'node_id' ] },
-	'proxy-set':    { m: 'post', p: '/api/v1/plugin/proxy',  body: [ 'policy' ] },
+	// policy 是**嵌套对象**：rpcd 把所有 arg 当 String，直接传对象会 INVALID_ARGUMENT，
+	// 故经 `jsonArg` 收 JSON 字符串再解回对象（客户端负责 json 编码）。
+	'proxy-set':    { m: 'post', p: '/api/v1/plugin/proxy',  body: [ 'policy' ], jsonArg: 'policy' },
 	// service：action 以**执行器实现**为准（OpenWrt 上 mynetd 走 Lua，
 	// 白名单 = start|stop|reload|restart；**不含 status**，状态请用 status/runtime）
 	service:        { m: 'post', p: '/api/v1/command', argv: {
@@ -82,9 +84,26 @@ function call(name, req) {
 		}
 		else {
 			data = {};
-			for (let k in (e.body ?? []))
-				if (args[e.body[k]] != null)
-					data[e.body[k]] = args[e.body[k]];
+			// ⚠️ 用**下标**遍历 e.body：ucode 的 `for (k in array)` 取的是**元素值**
+			// 而非下标，写成 `e.body[k]` 会取空（实测 body 分支因此静默丢参）。
+			const names = e.body ?? [];
+			for (let bi = 0; bi < length(names); bi++) {
+				const fld = names[bi];
+				if (args[fld] == null)
+					continue;
+				let v = args[fld];
+				// jsonArg：该字段以 JSON **字符串**传入（见 TABLE 注释），解回对象/数组。
+				// ⚠️ 不用 `typeof`/`type` 做类型判断：**rpcd 的 ucode 宿主里它们不可用**
+				// （实测一调就抛、ubus 只回 "Unknown error"）。直接 try-parse 最稳。
+				if (e.jsonArg == fld) {
+					let d2 = null;
+					try { d2 = json(v); } catch (je) { d2 = null; }
+					if (d2 == null)
+						return { success: false, error: 'bad-param', detail: fld };
+					v = d2;
+				}
+				data[fld] = v;
+			}
 		}
 
 		cmd += `-X POST -H 'Content-Type: application/json' --data ${shellquote(sprintf('%J', data))} `;
