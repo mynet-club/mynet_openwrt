@@ -22,6 +22,10 @@ function run(cmd) {
 }
 
 // 固定方法表：只读映射；argv 逐动作写死（不接受任意 argv）
+//
+// 写侧 body 白名单与 localapi handler 的**实际字段**逐一对齐（曾写成
+// `active/auto`、`action/pub_hex`、`enabled` —— 与 handler 的
+// `start` / `generate·private_hex·public_hex` / `policy` 不符，会 400）。
 const TABLE = {
 	status:         { m: 'get',  p: '/api/v1/status' },
 	'node-status':  { m: 'get',  p: '/api/v1/node-status' },
@@ -33,11 +37,14 @@ const TABLE = {
 	metrics:        { m: 'get',  p: '/api/v1/metrics' },
 	'proxy-status': { m: 'get',  p: '/api/v1/plugin/proxy' },
 	logs:           { m: 'get',  p: '/api/v1/logs', lines: true },
+	// 写
 	connect:        { m: 'post', p: '/api/v1/config/connect' },
-	sync:           { m: 'post', p: '/api/v1/config/apply', body: [ 'active', 'auto' ] },
-	'keys-sync':    { m: 'post', p: '/api/v1/config/keys', body: [ 'action', 'pub_hex' ] },
-	'switch-node':  { m: 'post', p: '/api/v1/nodes/switch', body: [ 'node_id' ] },
-	'proxy-set':    { m: 'post', p: '/api/v1/plugin/proxy', body: [ 'enabled' ] },
+	apply:          { m: 'post', p: '/api/v1/config/apply',  body: [ 'start' ] },
+	keys:           { m: 'post', p: '/api/v1/config/keys',   body: [ 'generate', 'private_hex', 'public_hex', 'node_id', 'vpn_type' ] },
+	active:         { m: 'post', p: '/api/v1/config/active', body: [ 'tenant', 'node', 'setup_only', 'vpn_type' ] },
+	prepare:        { m: 'post', p: '/api/v1/config/prepare' },
+	'switch-node':  { m: 'post', p: '/api/v1/nodes/switch',  body: [ 'node_id' ] },
+	'proxy-set':    { m: 'post', p: '/api/v1/plugin/proxy',  body: [ 'policy' ] },
 	// service：action 以**执行器实现**为准（OpenWrt 上 mynetd 走 Lua，
 	// 白名单 = start|stop|reload|restart；**不含 status**，状态请用 status/runtime）
 	service:        { m: 'post', p: '/api/v1/command', argv: {
@@ -117,10 +124,12 @@ const methods = {
 	'proxy-status':    { call: (req) => call('proxy-status', req) },
 	logs:              { args: { lines: 'lines' }, call: (req) => call('logs', req) },
 	connect:           { call: (req) => call('connect', req) },
-	sync:              { args: { active: 'active', auto: 'auto' }, call: (req) => call('sync', req) },
-	'keys-sync':       { args: { action: 'action', pub_hex: 'pub_hex' }, call: (req) => call('keys-sync', req) },
+	apply:             { args: { start: 'start' }, call: (req) => call('apply', req) },
+	keys:              { args: { generate: 'generate', private_hex: 'private_hex', public_hex: 'public_hex', node_id: 'node_id', vpn_type: 'vpn_type' }, call: (req) => call('keys', req) },
+	active:            { args: { tenant: 'tenant', node: 'node', setup_only: 'setup_only', vpn_type: 'vpn_type' }, call: (req) => call('active', req) },
+	prepare:           { call: (req) => call('prepare', req) },
 	'switch-node':     { args: { node_id: 'node_id' }, call: (req) => call('switch-node', req) },
-	'proxy-set':       { args: { enabled: 'enabled' }, call: (req) => call('proxy-set', req) },
+	'proxy-set':       { args: { policy: 'policy' }, call: (req) => call('proxy-set', req) },
 	service:           { args: { action: 'action' }, call: (req) => call('service', req) }
 };
 

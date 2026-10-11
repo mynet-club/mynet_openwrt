@@ -29,8 +29,10 @@
 			"ubus": {
 				"mynet": [
 					"connect",
-					"sync",
-					"keys-sync",
+					"apply",
+					"keys",
+					"active",
+					"prepare",
 					"switch-node",
 					"proxy-set",
 					"service"

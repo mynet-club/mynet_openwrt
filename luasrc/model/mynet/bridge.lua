@@ -19,7 +19,8 @@ M.METHODS = {
     "status", "node-status", "nodes", "identity", "runtime",
     "tenants", "wizard-state", "metrics", "proxy-status", "logs",
     -- 写（ACL write）
-    "connect", "sync", "keys-sync", "switch-node", "proxy-set", "service",
+    "connect", "apply", "keys", "active", "prepare",
+    "switch-node", "proxy-set", "service",
 }
 
 local METHOD_SET = {}
@@ -73,11 +74,14 @@ function M.proxy_status() return M.call("proxy-status") end
 function M.logs(lines)    return M.call("logs", lines and { lines = lines } or nil) end
 
 -- ── 写（页面操作）───────────────────────────────────────────────
-function M.connect(args)        return M.call("connect", args) end
-function M.sync(args)           return M.call("sync", args) end
-function M.keys_sync(args)      return M.call("keys-sync", args) end
+-- fields 为 table；逐字段白名单由 .uc 侧限定（与 localapi handler 字段对齐）。
+function M.connect()            return M.call("connect") end
+function M.apply(start)         return M.call("apply", { start = start }) end
+function M.keys(fields)         return M.call("keys", fields) end
+function M.active(fields)       return M.call("active", fields) end
+function M.prepare()            return M.call("prepare") end
 function M.switch_node(node_id) return M.call("switch-node", { node_id = node_id }) end
-function M.proxy_set(enabled)   return M.call("proxy-set", { enabled = enabled }) end
+function M.proxy_set(policy)    return M.call("proxy-set", { policy = policy }) end
 
 -- service(op) op ∈ {start,stop,reload,restart}（执行器白名单，见 O2 映射表）
 function M.service(op)          return M.call("service", { action = op }) end

@@ -18,10 +18,17 @@
 | `mynet.wizard-state` | `/api/v1/wizard/state` | GET | — | read | `wizard.go:106` |
 | `mynet.logs` | `/api/v1/logs` | GET | `lines?`（数字上限） | read | `server.go:79` |
 | `mynet.metrics` | `/api/v1/metrics` | GET | — | read | `server.go:80` |
-| `mynet.connect` | `/api/v1/config/connect` | POST | `mode,node_id,tenant` | write | `config_api.go:32` |
-| `mynet.switch-node` | `/api/v1/nodes/switch` | POST | `node_id` | write | `server.go:83` |
-| `mynet.sync` | `/api/v1/config/apply` | POST | `active,auto` | write | `config_api.go:35` |
-| `mynet.keys-sync` | `/api/v1/config/keys` | POST | `action,pub_hex` | write | `config_api.go:28`（**只进不出：不回私钥**） |
+| `mynet.proxy-status` | `/api/v1/plugin/proxy` | GET | — | read | `proxy_api.go:38` |
+| `mynet.connect` | `/api/v1/config/connect` | POST | —（无 body） | write | `config_api.go:32` |
+| `mynet.apply` | `/api/v1/config/apply` | POST | `start` | write | `config_api.go:35` |
+| `mynet.keys` | `/api/v1/config/keys` | POST | `generate,private_hex,public_hex,node_id,vpn_type` | write | `config_api.go:28`（**只进不出：不回私钥**） |
+| `mynet.active` | `/api/v1/config/active` | POST | `tenant,node,setup_only,vpn_type` | write | `config_api.go`（接入/选节点） |
+| `mynet.prepare` | `/api/v1/config/prepare` | POST | —（无 body） | write | `config_api.go`（keys ensure/sync/pull） |
+| `mynet.switch-node` | `/api/v1/nodes/switch` | POST | `node_id` | write | `server.go:83`（只切焦点） |
+| `mynet.proxy-set` | `/api/v1/plugin/proxy` | POST | `policy`（ProxyPolicy 对象） | write | `proxy_api.go` |
+| `mynet.service` | `/api/v1/command` | POST | `action ∈ start\|stop\|reload\|restart` | write | `server.go:81`（argv 逐动作写死） |
+
+> ⚠️ **写侧 body 白名单必须与 handler 字段逐一对齐**（2026-10-11 修正）：此前写成 `active,auto` / `action,pub_hex` / `enabled`，与 handler 的 `start` / `generate,private_hex,public_hex` / `policy` **不符**，实调必 400。
 
 ## 2. 明确**不做**（桥的安全边界）
 
