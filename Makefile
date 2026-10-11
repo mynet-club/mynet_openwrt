@@ -71,9 +71,9 @@ define Package/luci-app-mynet/install
 	# client 分流（nft/ipset/ip rule/table）与其配置/列表生成**已归 Go**（agent 读的
 	# 意图 → apply 落地 → 刷周边）。故 proxy.sh / route_policy.sh / plugin 钩子
 	# 全部退役（2026-10-11：此前 Lua 与 Go 两份 writer 抢同一套 0xc8/200 对象）。
-	# 保留 dns_split.sh：DNS 分流是另一关注点，另行收口。
-	$(INSTALL_DIR) $(1)/etc/mynet/scripts/proxy
-	$(INSTALL_BIN) ./scripts/proxy/dns_split.sh $(1)/etc/mynet/scripts/proxy/
+	# dns_split.sh 亦退役（L4，同日）：它只由已死的 proxy.lua.start 调用；DNS 分流的
+	# 落地统一走 agent（`mynet proxy dns-split` / apply 的 ApplyProxyDNSFiles）。
+	# （整个 /etc/mynet/scripts/proxy/ 已无内容，不再创建。）
 
 	# --- Proxy IP sources (bundled default lists, do not overwrite if already exist on device) ---
 	$(INSTALL_DIR) $(1)/etc/mynet/conf/proxy/proxy_sources
