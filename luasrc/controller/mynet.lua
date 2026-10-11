@@ -1012,13 +1012,27 @@ function action_service_op()
                     ok_msg = "⚠ 防火墙自动配置失败: " .. (fw_msg or "") .. "\n"
                 end
             end
-            local res, code = util.exec_status("/etc/init.d/mynet " .. op .. " 2>&1")
-            if op == "enable" or op == "disable" then
-                ok_msg = (ok_msg or "") .. "mynet " .. op .. " ok"
+            if op == "start" or op == "stop" or op == "restart" then
+                -- O5：启停改走桥（service）；桥不可用回落 init.d。
+                local b_res
+                local mod_ok, bridge = pcall(require, "luci.model.mynet.bridge")
+                if mod_ok and bridge then b_res = bridge.service(op) end
+                if b_res then
+                    if b_res.success then
+                        ok_msg = (ok_msg or "") .. "mynet " .. op .. ": ok (bridge)"
+                    else
+                        err_msg = (b_res.detail or b_res.message or b_res.error or (op .. " failed"))
+                    end
+                else
+                    local res, code = util.exec_status("/etc/init.d/mynet " .. op .. " 2>&1")
+                    local detail = util.trim(res or "") ~= "" and util.trim(res) or "ok"
+                    ok_msg = (ok_msg or "") .. "mynet " .. op .. ": " .. detail
+                    if code ~= 0 then err_msg = ok_msg; ok_msg = nil end
+                end
             else
-                local detail = util.trim(res or "") ~= "" and util.trim(res) or "ok"
-                ok_msg = (ok_msg or "") .. "mynet " .. op .. ": " .. detail
-                if code ~= 0 then err_msg = ok_msg; ok_msg = nil end
+                -- enable/disable（autostart）是 procd 平台操作，仍走 init.d
+                util.exec_status("/etc/init.d/mynet " .. op .. " 2>&1")
+                ok_msg = (ok_msg or "") .. "mynet " .. op .. " ok"
             end
         end
     -- 网络操作（从原 network_op 合并）
