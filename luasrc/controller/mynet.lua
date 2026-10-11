@@ -2084,75 +2084,48 @@ end
 
 function api_proxy_start()
     if not require_local_api() then return end
-    -- O5：start↔enable（Go 侧只有意图开关）；桥不可用回落 Lua。
+    -- 分流归 Go（本地api 写意图 → apply 落地 → 刷周边）。桥不可用即失败：
+    -- 不再回退 Lua 实现 —— 那会成为第二个 writer，与 Go 抢同一套 0xc8/200 对象
+    -- （2026-10-11 实测：apply 的清理把 Lua 那份拆掉，代理时通时断）。
     local ok, msg = _proxy_via_bridge(true)
-    if ok == nil then
-        local params = _proxy_params()
-        local proxy_m = require("luci.model.mynet.proxy")
-        local vok, verr = proxy_m.validate_params(params)
-        if not vok then json_err(verr); return end
-        local mok, mmsg = proxy_m.start(params)
-        if mok then json_ok({ success = true, message = mmsg }) else json_err(mmsg or "start failed") end
-        return
-    end
+    if ok == nil then json_err("本地桥不可用：" .. tostring(msg)); return end
     if ok then json_ok({ success = true, message = "proxy started", method = msg })
     else json_err(msg) end
 end
 
 function api_proxy_stop()
     if not require_local_api() then return end
-    -- O5：stop↔disable；桥不可用回落 Lua。
+    -- 同 start：桥不可用即失败，不回退 Lua。
     local ok, msg = _proxy_via_bridge(false)
-    if ok == nil then
-        local proxy_m = require("luci.model.mynet.proxy")
-        local mok, mmsg = proxy_m.stop()
-        if mok then json_ok({ success = true, message = mmsg }) else json_err(mmsg or "stop failed") end
-        return
-    end
+    if ok == nil then json_err("本地桥不可用：" .. tostring(msg)); return end
     if ok then json_ok({ success = true, message = "proxy stopped", method = msg })
     else json_err(msg) end
 end
 
 function api_proxy_reload()
     if not require_local_api() then return end
-    -- O5：reload↔按当前意图重投影（Go 无进程级 reload）；桥不可用回落 Lua。
+    -- 按当前意图重投影（Go 无进程级 reload）。桥不可用即失败，不回退 Lua。
     local cur = _proxy_current_enabled()
-    if cur ~= nil then
-        local ok, msg = _proxy_via_bridge(cur)
-        if ok then json_ok({ success = true, message = "proxy reloaded", method = msg })
-        else json_err(msg) end
-        return
-    end
-    local proxy_m = require("luci.model.mynet.proxy")
-    local mok, mmsg = proxy_m.reload()
-    if mok then json_ok({ success = true, message = mmsg }) else json_err(mmsg or "reload failed") end
+    if cur == nil then json_err("无法读取当前代理意图（本地桥不可用）"); return end
+    local ok, msg = _proxy_via_bridge(cur)
+    if ok then json_ok({ success = true, message = "proxy reloaded", method = msg })
+    else json_err(msg) end
 end
 
 function api_proxy_enable()
     if not require_local_api() then return end
-    -- O5：写走桥（Go 单一权威）；桥不可用回落 Lua。
+    -- 写走桥（Go 单一权威）。桥不可用即失败，不回退 Lua。
     local ok, msg = _proxy_via_bridge(true)
-    if ok == nil then
-        local params = _proxy_params()
-        local proxy_m = require("luci.model.mynet.proxy")
-        local mok, mmsg = proxy_m.enable(params)
-        if mok then json_ok({ success = true, message = mmsg }) else json_err(mmsg or "enable failed") end
-        return
-    end
+    if ok == nil then json_err("本地桥不可用：" .. tostring(msg)); return end
     if ok then json_ok({ success = true, message = "proxy enabled", method = msg })
     else json_err(msg) end
 end
 
 function api_proxy_disable()
     if not require_local_api() then return end
-    -- O5：停用同样走桥（enabled=false）；桥不可用回落 Lua。
+    -- 停用同样走桥（enabled=false）。桥不可用即失败，不回退 Lua。
     local ok, msg = _proxy_via_bridge(false)
-    if ok == nil then
-        local proxy_m = require("luci.model.mynet.proxy")
-        local mok, mmsg = proxy_m.disable()
-        if mok then json_ok({ success = true, message = mmsg }) else json_err(mmsg or "disable failed") end
-        return
-    end
+    if ok == nil then json_err("本地桥不可用：" .. tostring(msg)); return end
     if ok then json_ok({ success = true, message = "proxy disabled", method = msg })
     else json_err(msg) end
 end

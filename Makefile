@@ -68,22 +68,11 @@ define Package/luci-app-mynet/install
 	$(INSTALL_DATA) ./luasrc/usr/lib/rpcd/ucode/mynet.uc $(1)/usr/share/rpcd/ucode/mynet.uc
 
 	# --- Runtime scripts: proxy ---
-	$(INSTALL_DIR) $(1)/etc/mynet/scripts/proxy/hooks
-	$(INSTALL_BIN) ./scripts/proxy/proxy.sh $(1)/etc/mynet/scripts/proxy/
-	$(INSTALL_BIN) ./scripts/proxy/hooks/pre_start.sh $(1)/etc/mynet/scripts/proxy/hooks/
-	$(INSTALL_BIN) ./scripts/proxy/hooks/post_start.sh $(1)/etc/mynet/scripts/proxy/hooks/
-	$(INSTALL_BIN) ./scripts/proxy/hooks/stop.sh $(1)/etc/mynet/scripts/proxy/hooks/
-
-	# --- Plugin 钩子按插件布局**随包直接落盘**（不再由 postinst cp）---
-	# opkg 先 unpack 全部包、再 configure（实测输出：两条 Installing 在前，两条
-	# Configuring 在后）。钩子作为数据文件落地 ⇒ agent 的 postinst 起服务时
-	# run_plugin_hooks 必然能找到它们，从根上消除「luci postinst 补钩子晚于 agent
-	# 起服务」的竞态（2026-10-11 升 .182 实测：代理静默没起，fwmark/路由表缺失）。
-	$(INSTALL_DIR) $(1)/etc/mynet/scripts/plugin/proxy
-	$(INSTALL_BIN) ./scripts/proxy/hooks/pre_start.sh $(1)/etc/mynet/scripts/plugin/proxy/
-	$(INSTALL_BIN) ./scripts/proxy/hooks/post_start.sh $(1)/etc/mynet/scripts/plugin/proxy/
-	$(INSTALL_BIN) ./scripts/proxy/hooks/stop.sh $(1)/etc/mynet/scripts/plugin/proxy/
-	$(INSTALL_BIN) ./scripts/proxy/route_policy.sh $(1)/etc/mynet/scripts/proxy/
+	# client 分流（nft/ipset/ip rule/table）与其配置/列表生成**已归 Go**（agent 读的
+	# 意图 → apply 落地 → 刷周边）。故 proxy.sh / route_policy.sh / plugin 钩子
+	# 全部退役（2026-10-11：此前 Lua 与 Go 两份 writer 抢同一套 0xc8/200 对象）。
+	# 保留 dns_split.sh：DNS 分流是另一关注点，另行收口。
+	$(INSTALL_DIR) $(1)/etc/mynet/scripts/proxy
 	$(INSTALL_BIN) ./scripts/proxy/dns_split.sh $(1)/etc/mynet/scripts/proxy/
 
 	# --- Proxy IP sources (bundled default lists, do not overwrite if already exist on device) ---
@@ -155,9 +144,7 @@ define Package/luci-app-mynet/postinst
 rm -rf /etc/mynet/scripts/_src
 # 服务登记**不在本包**：由 mynet-agent 的 postinst 调 `mynet install`
 # （登记唯一 owner；本包不写 init、不 enable/start）。
-# plugin/proxy 钩子改为随包落地（见 install 段），**不再在这里 cp** —— postinst
-# 晚于 agent 的 postinst 执行，那时服务已经起过、run_plugin_hooks 找不到钩子，
-# 代理就静默没起（2026-10-11 升 .182 实测：fwmark/路由表缺失、隧道正常）。
+# plugin/proxy 钩子已退役（client 分流归 Go，见 install 段），这里无需再做任何事。
 # Clear LuCI cache
 rm -rf /tmp/luci-*
 exit 0
