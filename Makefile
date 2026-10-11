@@ -73,6 +73,16 @@ define Package/luci-app-mynet/install
 	$(INSTALL_BIN) ./scripts/proxy/hooks/pre_start.sh $(1)/etc/mynet/scripts/proxy/hooks/
 	$(INSTALL_BIN) ./scripts/proxy/hooks/post_start.sh $(1)/etc/mynet/scripts/proxy/hooks/
 	$(INSTALL_BIN) ./scripts/proxy/hooks/stop.sh $(1)/etc/mynet/scripts/proxy/hooks/
+
+	# --- Plugin 钩子按插件布局**随包直接落盘**（不再由 postinst cp）---
+	# opkg 先 unpack 全部包、再 configure（实测输出：两条 Installing 在前，两条
+	# Configuring 在后）。钩子作为数据文件落地 ⇒ agent 的 postinst 起服务时
+	# run_plugin_hooks 必然能找到它们，从根上消除「luci postinst 补钩子晚于 agent
+	# 起服务」的竞态（2026-10-11 升 .182 实测：代理静默没起，fwmark/路由表缺失）。
+	$(INSTALL_DIR) $(1)/etc/mynet/scripts/plugin/proxy
+	$(INSTALL_BIN) ./scripts/proxy/hooks/pre_start.sh $(1)/etc/mynet/scripts/plugin/proxy/
+	$(INSTALL_BIN) ./scripts/proxy/hooks/post_start.sh $(1)/etc/mynet/scripts/plugin/proxy/
+	$(INSTALL_BIN) ./scripts/proxy/hooks/stop.sh $(1)/etc/mynet/scripts/plugin/proxy/
 	$(INSTALL_BIN) ./scripts/proxy/route_policy.sh $(1)/etc/mynet/scripts/proxy/
 	$(INSTALL_BIN) ./scripts/proxy/dns_split.sh $(1)/etc/mynet/scripts/proxy/
 
@@ -145,37 +155,11 @@ define Package/luci-app-mynet/postinst
 rm -rf /etc/mynet/scripts/_src
 # 服务登记**不在本包**：由 mynet-agent 的 postinst 调 `mynet install`
 # （登记唯一 owner；本包不写 init、不 enable/start）。
-# Sync proxy hooks -> plugin/proxy/（文件布局，归包）
-mkdir -p /etc/mynet/scripts/plugin/proxy
-for _h in pre_start post_start stop; do
-    _src="/etc/mynet/scripts/proxy/hooks/$${_h}.sh"
-    _dst="/etc/mynet/scripts/plugin/proxy/$${_h}.sh"
-    [ -f "$$_src" ] && cp -f "$$_src" "$$_dst" && chmod 0755 "$$_dst"
-done
-unset _h _src _dst
+# plugin/proxy 钩子改为随包落地（见 install 段），**不再在这里 cp** —— postinst
+# 晚于 agent 的 postinst 执行，那时服务已经起过、run_plugin_hooks 找不到钩子，
+# 代理就静默没起（2026-10-11 升 .182 实测：fwmark/路由表缺失、隧道正常）。
 # Clear LuCI cache
 rm -rf /tmp/luci-*
-# firewall zone / env / init 归 `mynet install`（agent 包 postinst 调）
-
-# ⚠️ 包顺序竞态：agent 包的 postinst 会跑 `mynet install`（起 mynetd → 拉 bundle →
-# service.reload → init start_service → run_plugin_hooks post_start）。opkg 先配 agent
-# 后配本包时，那一刻 plugin/proxy/ 钩子还没落地 ⇒ 代理**静默没起**（症状：fwmark 规则
-# 与 mynet_proxy 路由表缺失，隧道本身正常）。2026-10-11 升 .182 实测踩到两次。
-#
-# 钩子同步完之后补跑 post_start。**必须等 tun**：agent 刚拉起 gnb，tun 要 1~3s 才出现，
-# 此时 proxy.start() 会因缺 tun 返回非零。若本包先于 agent 配置（gnb 还没起），就单次
-# 尝试即可 —— 钩子已在位，agent 随后的 start_service 会自己跑通。
-_wait=0
-if pidof gnb >/dev/null 2>&1; then
-    while [ "$$_wait" -lt 15 ]; do
-        ip -o link show 2>/dev/null | grep -q gnb_tun && break
-        _wait=$$((_wait + 1)); sleep 1
-    done
-fi
-if [ -x /etc/mynet/scripts/plugin/proxy/post_start.sh ]; then
-    MYNET_HOME=/etc/mynet sh /etc/mynet/scripts/plugin/proxy/post_start.sh >/dev/null 2>&1 || true
-fi
-unset _wait
 exit 0
 endef
 
