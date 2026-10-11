@@ -1684,6 +1684,31 @@ function api_logs_tail()
     if not require_local_api() then return end
     local lines = tonumber(http.formvalue("lines")) or 100
     if lines > 500 then lines = 500 end
+
+    -- O5/E13：日志改走桥（mynetd `/logs`：内存事件环 + 文件尾，已脱敏）。
+    -- 先试试桥；不可用再回落 Lua 的 luci.log（旧路径，逐步退役）。
+    local mod_ok, bridge = pcall(require, "luci.model.mynet.bridge")
+    if mod_ok and bridge then
+        local res = bridge.logs(lines)
+        if res and res.success and res.data then
+            local buf = {}
+            for _, e in ipairs(res.data.events or {}) do
+                local lv = (e.level or "")
+                local line = string.format("%s %-5s %s %s", e.time or "", lv:upper(),
+                    e.comp and ("[" .. e.comp .. "]") or "", e.msg or "")
+                if e.attrs and e.attrs ~= "" then line = line .. " " .. e.attrs end
+                buf[#buf + 1] = line
+            end
+            for _, f in ipairs(res.data.files or {}) do
+                buf[#buf + 1] = "--- " .. (f.name or "?") .. " ---"
+                local t = util.trim(f.text or "")
+                if t ~= "" then buf[#buf + 1] = t end
+            end
+            json_ok({ success = true, log = table.concat(buf, "\n"), path = "mynetd:/api/v1/logs" })
+            return
+        end
+    end
+
     local log_path = util.MYNET_HOME .. "/logs/luci.log"
     local content = util.trim(util.exec("tail -" .. tostring(lines) .. " " .. log_path .. " 2>/dev/null") or "")
     json_ok({ success = true, log = content, path = log_path })

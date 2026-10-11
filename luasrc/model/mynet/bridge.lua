@@ -71,7 +71,8 @@ function M.tenants()      return M.call("tenants") end
 function M.wizard_state() return M.call("wizard-state") end
 function M.metrics()      return M.call("metrics") end
 function M.proxy_status() return M.call("proxy-status") end
-function M.logs(lines)    return M.call("logs", lines and { lines = lines } or nil) end
+-- logs：lines 需为**数字字符串**（.uc 侧用 /^[0-9]{1,4}$/ 校验，传 number 会被拒）
+function M.logs(lines)    return M.call("logs", lines and { lines = tostring(lines) } or nil) end
 
 -- ── 写（页面操作）───────────────────────────────────────────────
 -- fields 为 table；逐字段白名单由 .uc 侧限定（与 localapi handler 字段对齐）。
