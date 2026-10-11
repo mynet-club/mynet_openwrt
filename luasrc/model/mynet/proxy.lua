@@ -445,7 +445,7 @@ function M.start(opts)
         "MYNET_HOME=" .. util.shell_escape(util.MYNET_HOME)
         .. " bash " .. util.shell_escape(ROUTE_POLICY_SH) .. " start 2>&1")
 
-    -- 始终路由非国内 DNS 服务器到 GNB 隧道，并保存状态
+    -- 始终清理历史遗留的「外部 DNS /32 主表路由」，并保存状态
     -- 必须在 code 判断之前执行：dns_split 失败时 route_policy.sh 可能非零，
     -- 但核心策略路由（nft/ip rule/route table）已生效
     util.ensure_dir(util.MYNET_HOME .. "/var")
@@ -456,7 +456,12 @@ function M.start(opts)
         policy    = policy,
         dns_mode  = dns_mode,
     })
-    M.route_foreign_dns()
+    -- 清理外部 DNS /32 主表路由（历史行为：装成主表 host route，把**节点自身**
+    -- 发往 1.1.1.1/8.8.8.8 等的流量也送进隧道 —— 节点自己代理自己）。
+    -- 这些路由并非必需：外部 DNS 都在 nft 白名单集合里，转发的客户端流量照样
+    -- 被打标(0xc8) → table mynet_proxy → 隧道。这里保留清理，摘掉旧版本留在
+    -- 内核与自启路径上的存量（2026-10-11 裁决：节点自身直连）。
+    M.unroute_foreign_dns()
 
     if code ~= 0 then
         -- dns_split 失败不影响路由核心，记录警告并返回部分成功
@@ -471,38 +476,11 @@ function M.start(opts)
 end
 
 -- ─────────────────────────────────────────────────────────────
--- 路由非国内 DNS 服务器到 GNB 隧道（始终生效，无论代理/DNS 模式）
--- 本函数为唯一执行点，route_policy.sh 不再重复处理
+-- 外部 DNS 的主表 /32 路由已**下线**（2026-10-11 裁决：节点自身直连）。
+-- 历史实现（route_foreign_dns）把 8.8.8.8/32 等装进主表 → 连节点自身的解析流量
+-- 也被送进隧道；而外部 DNS 本就在 nft 白名单集合内，转发的客户端流量靠打标
+-- (0xc8) → table mynet_proxy 就够。这里只保留清理函数，摘掉旧版本的存量路由。
 -- ─────────────────────────────────────────────────────────────
-
-function M.route_foreign_dns(gnb_interface)
-    if not gnb_interface or gnb_interface == "" then
-        local cfg_m = require("luci.model.mynet.config")
-        gnb_interface = cfg_m.get_vpn_interface()
-    end
-    if not gnb_interface then return nil, "GNB interface not found" end
-
-    local routed, verified = 0, 0
-    for _, dns_ip in ipairs(M.FOREIGN_DNS_SERVERS) do
-        -- GUARD-OK 代理 DNS /32 走隧道，属产品面策略，不是对端路由写入
-        -- （对端路由唯一入口 = mynet apply，spec/route-apply-unification.md）
-        local ok = util.exec("ip route replace " .. dns_ip .. "/32 dev "
-            .. util.shell_escape(gnb_interface) .. " 2>/dev/null && echo ok || echo fail")
-        if ok:find("ok") then
-            routed = routed + 1
-            -- 验证实际出入接口是否为隐道（GNB 未起时会 fallback 到默认路由）
-            local route_get = util.exec("ip route get " .. dns_ip
-                .. " 2>/dev/null | head -1") or ""
-            if route_get:find("dev " .. gnb_interface, 1, true) then
-                verified = verified + 1
-            end
-        end
-    end
-    util.log_info(string.format(
-        "route_foreign_dns: routed=%d/%d verified=%d via %s",
-        routed, #M.FOREIGN_DNS_SERVERS, verified, gnb_interface))
-    return { routed = routed, verified = verified, total = #M.FOREIGN_DNS_SERVERS }, nil
-end
 
 function M.unroute_foreign_dns()
     for _, dns_ip in ipairs(M.FOREIGN_DNS_SERVERS) do

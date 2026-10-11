@@ -161,8 +161,9 @@ fix_wan_gateway_route() {
 }
 
 # ─── 路由非国内 DNS 服务器 ───
-# 该逻辑统一由 proxy.lua (M.route_foreign_dns / M.unroute_foreign_dns) 维护
-# 本脚本不再重复实现,以保证 Lua 与 shell 单一真相
+# 已下线（2026-10-11）：主表 /32 会把节点自身流量也送进隧道。外部 DNS 在 nft
+# 白名单集合内，转发的客户端流量靠打标(0xc8)+table mynet_proxy 即可。
+# 存量清理归 proxy.lua (M.unroute_foreign_dns)，本脚本不重复实现。
 
 # ─── split DNS 模式（dnsmasq + GFW list 域名分流）───
 # 完全委托给 dns_split.sh —— 本脚本不再保留 inline 实现,避免双源真相
@@ -290,8 +291,8 @@ start() {
     add_ip_rules
     fix_wan_gateway_route
 
-    # 非国内 DNS 路由已由 proxy.lua (M.route_foreign_dns) 在调用本脚本后执行，
-    # 此处不重复处理；split DNS 同样委托给 dns_split.sh
+    # 外部 DNS 主表路由已下线（2026-10-11）；存量清理归 proxy.lua
+    # (M.unroute_foreign_dns)，此处不重复处理；split DNS 同样委托给 dns_split.sh
 
     # DNS 模式处理
     case "${DNS_MODE:-none}" in

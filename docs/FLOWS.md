@@ -202,7 +202,7 @@ flowchart TD
     L2 --> M
     L3 --> M
     L4 --> M["proxy_state.json 写入 start_ts / mode / region / dns_mode"]
-    M --> N["route_foreign_dns<br/>ip route replace 8.8.8.8/32 dev gnb_tun<br/>+ 8.8.4.4 / 1.1.1.1 / 1.0.0.1 / 9.9.9.9 / 208.67.x<br/>(/32 优先级高于 /8 GNB 路由,确保 DNS 不被污染)"]
+    M --> N["unroute_foreign_dns<br/>清理历史遗留的外部 DNS /32 主表路由<br/>(已下线：不再把节点自身流量送进隧道)"]
     N --> O["register_firewall_include<br/>(防火墙重启自动恢复策略路由)"]
     O --> P[返回 success]
 
@@ -230,21 +230,22 @@ flowchart TD
 | `resolv` | 覆写本机 resolv.conf.auto | LAN 仍走 dnsmasq → peer_vip | 仅修改路由器自身 DNS |
 | `split` (新) | dnsmasq 默认走国内 + GFW list 走国外 | dnsmasq 智能分流 (国内 CDN+海外干净 IP) | **推荐**: 无需 peer smartdns 即可分流 |
 
-### 国外 DNS 服务器系统级路由（始终生效）
+### 外部 DNS 的系统级路由（已下线，2026-10-11）
 
-无论 `dns_mode` 设置如何,代理 `start()` 时都会执行 `route_foreign_dns`:
+历史行为：代理 `start()` 时**无条件**执行 `route_foreign_dns`，把外部 DNS 装成**主表**
+host route：
 
 ```text
-ip route replace 8.8.8.8/32       dev gnb_tun
-ip route replace 8.8.4.4/32       dev gnb_tun
-ip route replace 1.1.1.1/32       dev gnb_tun
-ip route replace 1.0.0.1/32       dev gnb_tun
-ip route replace 9.9.9.9/32       dev gnb_tun
-ip route replace 208.67.222.222/32 dev gnb_tun
-ip route replace 208.67.220.220/32 dev gnb_tun
+ip route replace 8.8.8.8/32  dev gnb_tun     # 8.8.4.4 / 1.1.1.1 / 1.0.0.1
+                                             # 9.9.9.9 / 208.67.222.222 / 208.67.220.220 同
 ```
 
-**作用**: /32 主表路由优先级高于 GNB 注入的 /8,确保任何客户端发往这些公共 DNS 的查询直接通过隧道,**不经过 ISP DNS 拦截/污染**。`stop()` 时通过 `unroute_foreign_dns` 全部撤销。
+问题：主表路由对所有来源生效，**节点自身**发往这些 DNS 的流量也被送进隧道 ——
+即「节点自己代理自己」；且与 `dns_mode=none` 的语义冲突（该层当时不受 dns_mode 门控）。
+
+现状：**不再安装**这些主表路由；`start()`/`stop()` 只调 `unroute_foreign_dns` 摘除旧
+版本留在内核/自启路径上的存量。外部 DNS 都在 nft 白名单集合内，**转发**的客户端流量
+照旧被打标(`0xc8`) → `table mynet_proxy` → 隧道；**节点自身**的解析流量走直连。
 
 ### DNS 流量路径详细对比
 
@@ -252,7 +253,7 @@ ip route replace 208.67.220.220/32 dev gnb_tun
 |---|---|---|---|---|
 | LAN 客户端 → 53 | dnsmasq → 原上游 | DNAT → peer_vip | dnsmasq → peer_vip | dnsmasq 分流 (国内 223.5.5.5 / 国外 8.8.8.8) |
 | 路由器自身 → 53 | dnsmasq → 原上游 | dnsmasq → 原上游 (OUTPUT 不 DNAT) | resolver → peer_vip | dnsmasq 分流 |
-| 客户端直连 8.8.8.8 | /32 主表 → gnb_tun | /32 主表 → gnb_tun | /32 主表 → gnb_tun | /32 主表 → gnb_tun |
+| 客户端直连 8.8.8.8 | 打标 0xc8 → mynet_proxy → gnb_tun | 同左 | 同左 | 同左 |
 
 ### 代理停止流程
 
