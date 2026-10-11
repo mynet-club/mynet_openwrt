@@ -1,7 +1,7 @@
 #!/bin/sh
 #
 # Proxy plugin — stop hook
-# Called by rc.mynet when GNB stops.
+# Called by the mynet init (/etc/init.d/mynet run_plugin_hooks) when GNB stops.
 # Only tears down nftables/ip rules (proxy.stop).
 #
 # NOTE: route.conf marker injection is NOT cleaned here.

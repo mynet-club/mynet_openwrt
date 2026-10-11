@@ -196,7 +196,7 @@ end
 
 -- ─────────────────────────────────────────────────────────────
 -- 生成完整 mynet.conf（bash-style KEY="VALUE" 格式）
--- 供 rc.mynet init 脚本、route.mynet 等 shell 脚本使用
+-- 供 shell 脚本（route/firewall helpers）使用
 -- 对齐 service-manager.sh generate_mynet_config()
 -- ─────────────────────────────────────────────────────────────
 function M.generate_mynet_conf(node_id)

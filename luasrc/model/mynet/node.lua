@@ -1127,7 +1127,7 @@ function M.generate_route_conf(node_id)
 
     -- 剔除 proxy 注入段（route_inject 已将策略路由追加到此文件，
     -- 必须在生成 OS 级 route.conf 前移除，否则 /8、/16 大段路由
-    -- 会被误认为子网路由写入 conf/route.conf 并由 route.mynet 添加）
+    -- 会被误认为子网路由写入 conf/route.conf 并由 mynet apply 添加）
     local proxy_m = require("luci.model.mynet.proxy")
     route_content = proxy_m.strip_route_injections(route_content)
 
@@ -1174,7 +1174,7 @@ function M.generate_route_conf(node_id)
 
     local content = table.concat(lines, "\n") .. "\n"
 
-    -- 写入 /etc/mynet/conf/route.conf（供 rc.mynet + service tab 使用）
+    -- 写入 /etc/mynet/conf/route.conf（供 mynet apply + service tab 使用）
     util.ensure_dir(util.CONF_DIR)
     local route_conf_path = util.CONF_DIR .. "/route.conf"
     local ok, we = util.write_file(route_conf_path, content)

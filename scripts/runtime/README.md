@@ -1,69 +1,47 @@
 # MyNet OpenWrt Runtime
 
-本目录是 MyNet 在 OpenWrt 上的运行时脚本源码。
+本目录是 MyNet 在 OpenWrt 上的运行时脚本源码。**当前只剩 `firewall.mynet` 一件。**
 
 ## 目录结构
 
 ```
 scripts/runtime/
-├── rc.mynet            # init.d 服务脚本源码
-├── route.mynet         # 路由管理脚本源码
-├── firewall.mynet      # 防火墙管理脚本源码
-└── modules/
-    ├── route.sh        # 路由模块
-    └── firewall.sh     # 防火墙模块
+└── firewall.mynet      # 防火墙/zone/NAT 管理（平台正本）
 ```
 
 ## 部署后的系统路径
 
 ```
-/etc/init.d/mynet                       ← rc.mynet
-/etc/mynet/scripts/route.mynet          ← route.mynet
-/etc/mynet/scripts/firewall.mynet       ← firewall.mynet
+/etc/mynet/scripts/firewall.mynet       ← firewall.mynet（Makefile 安装）
+/etc/init.d/{mynet,mynetd}              ← 由 `mynet install` 从 agent 的内嵌模板写出，不在本仓
 ```
 
-这些文件由 Makefile / release workflow / `debug/sync.sh` 复制到运行时路径。
+## 职责边界（2026-10-11 收口，O1-③）
 
-## 路由管理
+| 能力 | 归属 | 说明 |
+|---|---|---|
+| **路由 / 防火墙应用**（读 bundle → 装 OS 路由/防火墙） | **Go**（跨平台，非 OpenWrt 专有） | `mynet apply --auto`；LuCI 经桥的 `route-apply` 调它 |
+| **出口/分流策略** | **Go** | `ProxyPolicy` + `planProxy` |
+| **UCI/fw4 细节**（zone/forwarding/masq、`uci commit`、fw4 reload） | **本目录 `firewall.mynet`** | 平台专属，LuCI 只调它（不再内联 uci/nft） |
+| **服务启停** | **procd**（`/etc/init.d/mynet`） | init 由 `mynet install` 写；Go 只下令 |
 
-```bash
-# 应用路由（读取 route.conf，添加内核路由）
-MYNET_HOME=/etc/mynet sh /etc/mynet/scripts/route.mynet start \
-  --config /etc/mynet/conf/route.conf --interface gnb_tun_16
-
-# 移除路由
-MYNET_HOME=/etc/mynet sh /etc/mynet/scripts/route.mynet stop \
-  --config /etc/mynet/conf/route.conf --interface gnb_tun_16
-```
-
-### route.conf 格式
+### firewall.mynet 子命令
 
 ```
-# <cidr> dev <vpn_iface>
-10.150.14.220/32 dev gnb_tun_16
-192.168.8.0/24 dev gnb_tun_16
+firewall.mynet install | uninstall | start | stop | restart | status
+firewall.mynet commit                       # uci commit firewall && /etc/init.d/firewall reload
+firewall.mynet nat outbound|inbound 0|1     # 出站 NAT(zone masq) / 入站 NAT(mynet→lan 转发)
 ```
 
-> 注意：不要使用 `via <gateway>` 格式，tun 设备的对端 VPN IP 不是 on-link 网关。
+> `nat` / `commit` 是页面 NAT / fw-reload 按钮的落点；UCI 细节留在这里，页面不直写。
+
+## 已退役（别再当遗留捡回来）
+
+- `route.mynet` —— 本是 `mynet apply` 的薄壳，已由桥直连 `apply --auto` 取代
+- `modules/{route,firewall}.sh` —— `route.mynet` 的 guts
+- `rc.mynet` / `rc.mynet.procd.snippet` / `mynetd.init` —— 旧 Lua init；现由 `mynet install` 从 agent 内嵌模板写出
 
 ## 相关文档
 
 - [OpenWrt VPN 跨网段互通设计](../../docs/openwrt_gw.md)
-
-## 📋 依赖要求
-
-- OpenWrt 系统
-- MyNet (GNB/WireGuard) 已安装
-- root权限或sudo访问
-- 基本网络工具 (ip, iptables等)
-
-## 💡 使用建议
-
-1. **首次部署**: 使用`./deploy-service.sh --auto-yes`
-2. **配置调整**: 修改`templates/`下的模板文件
-3. **手动调试**: 使用`route_gw_simple.sh`进行手动配置
-4. **故障排查**: 查看`docs/`目录下的详细文档
-
----
-
-**注意**: 部署前请备份重要配置文件，建议先在测试环境中验证。
+- 生命周期合同 / O0 操作矩阵（`mynet_ctl/docs/knowledge-base/spec/`）

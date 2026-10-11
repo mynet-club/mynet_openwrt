@@ -19,7 +19,6 @@ M.LOG_FILE    = M.MYNET_HOME .. "/logs/luci.log"
 
 -- 脚本目录
 M.SCRIPTS_DIR     = M.MYNET_HOME .. "/scripts"
-M.ROUTE_SCRIPT    = M.SCRIPTS_DIR .. "/route.mynet"
 M.FIREWALL_SCRIPT = M.SCRIPTS_DIR .. "/firewall.mynet"
 
 -- GNB 驱动目录（对应 mynet_tui driver/gnb 结构）

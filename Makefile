@@ -96,10 +96,9 @@ define Package/luci-app-mynet/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) ./scripts/shell/heartbeat.sh $(1)/usr/bin/mynet-heartbeat
 
-	# --- Deploy route.mynet / firewall.mynet to scripts/ (fixed path) ---
+	# --- Deploy firewall.mynet 到 scripts/（平台防火墙正本；新 init 也调它）---
+	# route.mynet 已退役：路由唯一路径 = 桥 → Go apply --auto（O1-③）
 	$(INSTALL_DIR) $(1)/etc/mynet/scripts
-	$(INSTALL_BIN) ./scripts/runtime/route.mynet \
-		$(1)/etc/mynet/scripts/
 	$(INSTALL_BIN) ./scripts/runtime/firewall.mynet \
 		$(1)/etc/mynet/scripts/
 

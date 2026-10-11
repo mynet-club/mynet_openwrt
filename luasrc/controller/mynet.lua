@@ -1038,8 +1038,8 @@ function action_service_op()
     -- 网络操作（从原 network_op 合并）
     elseif service == "network" then
         if op == "reload_route" then
-            -- O5：应用 OS 路由/防火墙走桥（Go `apply --auto`，跨平台，非 OpenWrt 专属）；
-            -- 桥不可用才回落 Lua 的 route.mynet。
+            -- O5/O1-③：应用 OS 路由/防火墙**唯一路径** = 桥 → Go `apply --auto`
+            -- （跨平台能力归 Go）。桥/daemon 不可用即明确报错，不再回落 Lua 脚本。
             local b_res
             local mod_ok, bridge = pcall(require, "luci.model.mynet.bridge")
             if mod_ok and bridge then b_res = bridge.route_apply() end
@@ -1050,25 +1050,7 @@ function action_service_op()
                     err_msg = (b_res.detail or b_res.message or b_res.error or "route apply failed")
                 end
             else
-                local iface = cfg_m.get_vpn_interface()
-                if not util.file_exists(util.VPN_CONF) then
-                    err_msg = "mynet.conf 不存在，请先配置节点"
-                elseif not util.file_exists(util.CONF_DIR .. "/route.conf") then
-                    err_msg = "route.conf 不存在，请先同步节点配置"
-                elseif not util.file_exists(util.ROUTE_SCRIPT) then
-                    err_msg = "route.mynet 脚本不存在"
-                else
-                    local iface_check = util.trim(util.exec("ip link show " .. iface .. " 2>/dev/null") or "")
-                    if iface_check == "" then
-                        err_msg = "VPN 接口 " .. iface .. " 未启动，请先启动服务"
-                    else
-                        local env = "MYNET_HOME=" .. util.MYNET_HOME
-                        local cmd = env .. " sh " .. util.ROUTE_SCRIPT .. " start --interface " .. iface .. " 2>&1"
-                        local out, code = util.exec_status(cmd)
-                        ok_msg = "route apply: " .. (util.trim(out or "") ~= "" and util.trim(out) or "ok")
-                        if code ~= 0 then err_msg = ok_msg; ok_msg = nil end
-                    end
-                end
+                err_msg = "mynetd/桥 不可用，无法应用路由（请检查服务）"
             end
         elseif op == "reload_fw" then
             local iface = cfg_m.get_vpn_interface()

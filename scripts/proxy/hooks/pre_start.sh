@@ -1,7 +1,7 @@
 #!/bin/sh
 #
 # Proxy plugin — pre_start hook
-# Called by rc.mynet before GNB starts.
+# Called by the mynet init (/etc/init.d/mynet run_plugin_hooks) before GNB starts.
 # Ensures GNB route.conf proxy injection is present before GNB starts.
 #
 

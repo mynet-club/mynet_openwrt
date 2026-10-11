@@ -1,7 +1,7 @@
 #!/bin/sh
 #
 # Proxy plugin — post_start hook
-# Called by rc.mynet after GNB starts.
+# Called by the mynet init (/etc/init.d/mynet run_plugin_hooks) after GNB starts.
 # If PROXY_ENABLED=1, starts proxy via Lua proxy.start().
 #
 
