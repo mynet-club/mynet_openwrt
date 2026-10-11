@@ -2193,29 +2193,18 @@ function api_proxy_config()
         else
             enabled = _proxy_current_enabled()
         end
-        if enabled ~= nil then
-            local bok, bmsg = _proxy_via_bridge(enabled)
-            if bok then
-                json_ok({ success = true, message = "config saved", method = bmsg })
-                return
-            elseif bok == false then
-                json_err(bmsg); return
-            end
-        end
-
-        -- 桥不可用 → 回落 Lua
-        local fields = {}
-        if params.mode      then fields.proxy_mode  = params.mode end
-        if params.region    then fields.node_region  = params.region end
-        if params.dns_mode  then fields.dns_mode     = params.dns_mode end
-        if params.dns_server then fields.dns_server  = params.dns_server end
-        if params.proxy_peers then fields.proxy_peers = params.proxy_peers end
-        if enabled_s then fields.proxy_enabled = (enabled_s == "1" or enabled_s == "true") end
-
-        proxy_m.update_config(fields)
-        json_ok({ success = true, message = "config saved" })
+        -- 写面**只走桥**（Go 单一权威 → localapi 写意图）。桥不可用即失败，不回退 Lua：
+        -- 回落会写 proxy_role.conf，那是一份**没人再读的影子配置**（2026-10-11 收口）。
+        local bok, bmsg = _proxy_via_bridge(enabled)
+        if bok == nil then json_err("本地桥不可用：" .. tostring(bmsg)); return end
+        if bok then json_ok({ success = true, message = "config saved", method = bmsg })
+        else json_err(bmsg) end
     else
-        json_ok({ success = true, data = proxy_m.load_config() })
+        -- 读面也走桥（localapi GET /plugin/proxy：effective / local / cloud），不再读 Lua conf。
+        local mod_ok, bridge = pcall(require, "luci.model.mynet.bridge")
+        local res = (mod_ok and bridge) and bridge.proxy_status() or nil
+        if not res then json_err("本地桥不可用（代理配置读取）"); return end
+        json_ok({ success = true, data = res.data })
     end
 end
 
