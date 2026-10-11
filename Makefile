@@ -160,11 +160,22 @@ rm -rf /tmp/luci-*
 # ⚠️ 包顺序竞态：agent 包的 postinst 会跑 `mynet install`（起 mynetd → 拉 bundle →
 # service.reload → init start_service → run_plugin_hooks post_start）。opkg 先配 agent
 # 后配本包时，那一刻 plugin/proxy/ 钩子还没落地 ⇒ 代理**静默没起**（症状：fwmark 规则
-# 与 mynet_proxy 路由表缺失，隧道本身正常）。2026-10-11 升 .182 实测踩过。
-# 钩子同步完之后补跑一次 post_start；隧道未就绪时它会自己失败退出（|| true），无副作用。
+# 与 mynet_proxy 路由表缺失，隧道本身正常）。2026-10-11 升 .182 实测踩到两次。
+#
+# 钩子同步完之后补跑 post_start。**必须等 tun**：agent 刚拉起 gnb，tun 要 1~3s 才出现，
+# 此时 proxy.start() 会因缺 tun 返回非零。若本包先于 agent 配置（gnb 还没起），就单次
+# 尝试即可 —— 钩子已在位，agent 随后的 start_service 会自己跑通。
+_wait=0
+if pidof gnb >/dev/null 2>&1; then
+    while [ "$$_wait" -lt 15 ]; do
+        ip -o link show 2>/dev/null | grep -q gnb_tun && break
+        _wait=$$((_wait + 1)); sleep 1
+    done
+fi
 if [ -x /etc/mynet/scripts/plugin/proxy/post_start.sh ]; then
     MYNET_HOME=/etc/mynet sh /etc/mynet/scripts/plugin/proxy/post_start.sh >/dev/null 2>&1 || true
 fi
+unset _wait
 exit 0
 endef
 
