@@ -1979,69 +1979,129 @@ function api_proxy_status()
     json_ok({ success = true, data = st })
 end
 
+
+-- O5：proxy 写路径的公共件。
+-- 组装 Go 的 ProxyPolicy（split 由 Go 侧按 region×policy 解算；这里只给业务参数）。
+local function _proxy_policy_from_params(enabled)
+    local p = { enabled = enabled and true or false }
+    local mode   = http.formvalue("mode") or http.formvalue("proxy_mode")
+    local region = http.formvalue("region") or http.formvalue("node_region")
+    local pol    = http.formvalue("proxy_policy")
+    if mode and mode ~= "" then p.role = mode end
+    if region and region ~= "" then p.region = region end
+    if pol and pol ~= "" then p.policy = pol end
+    local peers = http.formvalue("proxy_peers")
+    if peers and peers ~= "" then
+        local exits = {}
+        for id in peers:gmatch("[^,]+") do
+            id = id:match("^%s*(.-)%s*$")
+            if id ~= "" then exits[#exits+1] = { node_id = id, enabled = true } end
+        end
+        if #exits > 0 then p.exits = exits end
+    end
+    local dns_mode = http.formvalue("dns_mode")
+    if dns_mode and dns_mode ~= "" and dns_mode ~= "none" then
+        p.dns = { mode = dns_mode }
+        local ds = http.formvalue("dns_server")
+        if ds and ds ~= "" then p.dns.server = ds end
+    end
+    return p
+end
+
+-- 走桥写 proxy（唯一权威）。返回 (ok, method_or_err) 或 nil（桥不可用 → 调用方回落 Lua）。
+local function _proxy_via_bridge(enabled)
+    local mod_ok, bridge = pcall(require, "luci.model.mynet.bridge")
+    if not mod_ok or not bridge then return nil end
+    local res = bridge.proxy_set(_proxy_policy_from_params(enabled))
+    if not res then return nil end
+    if res.success then return true, "bridge" end
+    return false, (res.detail or res.message or res.error or "proxy set failed")
+end
+
+-- 当前生效的 enabled（读桥；读不到给 nil）
+local function _proxy_current_enabled()
+    local mod_ok, bridge = pcall(require, "luci.model.mynet.bridge")
+    if not mod_ok or not bridge then return nil end
+    local res = bridge.proxy_status()
+    if res and res.data and res.data.effective and res.data.effective.policy then
+        return res.data.effective.policy.enabled and true or false
+    end
+    return false
+end
+
 function api_proxy_start()
     if not require_local_api() then return end
-
-    local params = _proxy_params()
-    local proxy_m = require("luci.model.mynet.proxy")
-    local ok, err = proxy_m.validate_params(params)
-    if not ok then json_err(err); return end
-
-    local ok2, msg = proxy_m.start(params)
-    if ok2 then
-        json_ok({ success = true, message = msg })
-    else
-        json_err(msg or "start failed")
+    -- O5：start↔enable（Go 侧只有意图开关）；桥不可用回落 Lua。
+    local ok, msg = _proxy_via_bridge(true)
+    if ok == nil then
+        local params = _proxy_params()
+        local proxy_m = require("luci.model.mynet.proxy")
+        local vok, verr = proxy_m.validate_params(params)
+        if not vok then json_err(verr); return end
+        local mok, mmsg = proxy_m.start(params)
+        if mok then json_ok({ success = true, message = mmsg }) else json_err(mmsg or "start failed") end
+        return
     end
+    if ok then json_ok({ success = true, message = "proxy started", method = msg })
+    else json_err(msg) end
 end
 
 function api_proxy_stop()
     if not require_local_api() then return end
-
-    local proxy_m = require("luci.model.mynet.proxy")
-    local ok, msg = proxy_m.stop()
-    if ok then
-        json_ok({ success = true, message = msg })
-    else
-        json_err(msg or "stop failed")
+    -- O5：stop↔disable；桥不可用回落 Lua。
+    local ok, msg = _proxy_via_bridge(false)
+    if ok == nil then
+        local proxy_m = require("luci.model.mynet.proxy")
+        local mok, mmsg = proxy_m.stop()
+        if mok then json_ok({ success = true, message = mmsg }) else json_err(mmsg or "stop failed") end
+        return
     end
+    if ok then json_ok({ success = true, message = "proxy stopped", method = msg })
+    else json_err(msg) end
 end
 
 function api_proxy_reload()
     if not require_local_api() then return end
-
-    local proxy_m = require("luci.model.mynet.proxy")
-    local ok, msg = proxy_m.reload()
-    if ok then
-        json_ok({ success = true, message = msg })
-    else
-        json_err(msg or "reload failed")
+    -- O5：reload↔按当前意图重投影（Go 无进程级 reload）；桥不可用回落 Lua。
+    local cur = _proxy_current_enabled()
+    if cur ~= nil then
+        local ok, msg = _proxy_via_bridge(cur)
+        if ok then json_ok({ success = true, message = "proxy reloaded", method = msg })
+        else json_err(msg) end
+        return
     end
+    local proxy_m = require("luci.model.mynet.proxy")
+    local mok, mmsg = proxy_m.reload()
+    if mok then json_ok({ success = true, message = mmsg }) else json_err(mmsg or "reload failed") end
 end
 
 function api_proxy_enable()
     if not require_local_api() then return end
-
-    local params = _proxy_params()
-    local proxy_m = require("luci.model.mynet.proxy")
-    local ok, msg = proxy_m.enable(params)
-    if ok then
-        json_ok({ success = true, message = msg })
-    else
-        json_err(msg or "enable failed")
+    -- O5：写走桥（Go 单一权威）；桥不可用回落 Lua。
+    local ok, msg = _proxy_via_bridge(true)
+    if ok == nil then
+        local params = _proxy_params()
+        local proxy_m = require("luci.model.mynet.proxy")
+        local mok, mmsg = proxy_m.enable(params)
+        if mok then json_ok({ success = true, message = mmsg }) else json_err(mmsg or "enable failed") end
+        return
     end
+    if ok then json_ok({ success = true, message = "proxy enabled", method = msg })
+    else json_err(msg) end
 end
 
 function api_proxy_disable()
     if not require_local_api() then return end
-
-    local proxy_m = require("luci.model.mynet.proxy")
-    local ok, msg = proxy_m.disable()
-    if ok then
-        json_ok({ success = true, message = msg })
-    else
-        json_err(msg or "disable failed")
+    -- O5：停用同样走桥（enabled=false）；桥不可用回落 Lua。
+    local ok, msg = _proxy_via_bridge(false)
+    if ok == nil then
+        local proxy_m = require("luci.model.mynet.proxy")
+        local mok, mmsg = proxy_m.disable()
+        if mok then json_ok({ success = true, message = mmsg }) else json_err(mmsg or "disable failed") end
+        return
     end
+    if ok then json_ok({ success = true, message = "proxy disabled", method = msg })
+    else json_err(msg) end
 end
 
 function api_proxy_net_detect()
